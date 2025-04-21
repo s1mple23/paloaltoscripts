@@ -25,11 +25,12 @@ A pair of scripts to automate the process of discovering blocked URLs in Palo Al
 - pwinput
 - urllib3
 - ansible
-- paloaltonetworks.panos
+- pan-python
 
 
 3. **Ansible** (2.9+) with the **Palo Alto Networks PAN‑OS collection**:
    ```bash
+   sudo apt install ansible
    pip install ansible
    ansible-galaxy collection install paloaltonetworks.panos
 
