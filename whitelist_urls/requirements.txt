@@ -1,7 +1,4 @@
 requests
 pwinput
 urllib3
-ansible
-pan-python
 pan-os-python
-
