@@ -1,0 +1,6 @@
+requests
+pwinput
+urllib3
+ansible
+paloaltonetworks.panos
+

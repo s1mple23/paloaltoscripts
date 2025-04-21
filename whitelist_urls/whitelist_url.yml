@@ -1,0 +1,68 @@
+---
+- name: Add URLs to Palo Alto URL Whitelist
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    provider:
+      ip_address: "{{ ip_address }}"
+      username: "{{ username }}"
+      password: "{{ password }}"
+    url_entries: >
+      {{
+        target_url_list.split(",") |
+        map('regex_replace', '^', '') |
+        map('regex_replace', '$', '/') |
+        list +
+        target_url_list.split(",") |
+        map('regex_replace', '^', '*.') |
+        map('regex_replace', '$', '/') |
+        list
+      }}
+    log_file: "whitelist_log_{{ change_id }}.log"
+
+  tasks:
+
+    - name: Gather existing URL category
+      paloaltonetworks.panos.panos_custom_url_category:
+        provider: "{{ provider }}"
+        name: "{{ selected_category }}"
+        vsys: "{{ vsys }}"
+        state: gathered
+      register: current_category
+
+    - name: Merge new URLs into category
+      paloaltonetworks.panos.panos_custom_url_category:
+        provider: "{{ provider }}"
+        name: "{{ selected_category }}"
+        vsys: "{{ vsys }}"
+        url_value: "{{ (current_category.url_value | default([])) + url_entries | unique }}"
+        type: "URL List"
+        state: merged
+      register: update_result
+
+    - name: Commit configuration changes
+      paloaltonetworks.panos.panos_commit_firewall:
+        provider: "{{ provider }}"
+      register: commit_result
+      when: update_result.changed                                              # only commit if URLs were added :contentReference[oaicite:0]{index=0}
+
+    - name: Write change log
+      copy:
+        content: |
+          Change ID: {{ change_id }}
+          User: {{ username }}
+          Category: {{ selected_category }}
+          Added URLs:
+          {% for entry in url_entries %}
+            - {{ entry }}
+          {% endfor %}
+          Commit Job ID: {{ commit_result.jobid | default('n/a') }}
+        dest: "{{ log_file }}"
+      when: update_result.changed                                              # only write log if we committed :contentReference[oaicite:1]{index=1}
+
+    - name: No changes to commit, skipping
+      debug:
+        msg: "No new URLs were added; skipping commit."
+      when: not update_result.changed                                        # helpful feedback if nothing changed :contentReference[oaicite:2]{index=2}
