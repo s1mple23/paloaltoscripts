@@ -26,6 +26,7 @@ A pair of scripts to automate the process of discovering blocked URLs in Palo Al
 - urllib3
 - ansible
 - pan-python
+- pan-os-python
 
 
 3. **Ansible** (2.9+) with the **Palo Alto Networks PAN‑OS collection**:
