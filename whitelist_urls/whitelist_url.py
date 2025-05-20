@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+#Create and get API Key for Firewall Access
 def get_api_key(firewall_host, username, password):
     url = f"{firewall_host}/api/?type=keygen&user={username}&password={password}"
     resp = requests.get(url, verify=False)
