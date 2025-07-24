@@ -119,7 +119,7 @@ class SearchAttempt:
     timeout: int
     nlogs: int
     success: bool
-    urls_found: int
+    urls_found: int = 0  # Default value
     error: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
