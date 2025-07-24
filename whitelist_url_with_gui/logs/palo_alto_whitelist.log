@@ -1,8 +1,0 @@
-2025-07-24 09:07:39,197 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
- * Running on https://127.0.0.1:5010
-2025-07-24 09:07:39,198 - INFO - [33mPress CTRL+C to quit[0m
-2025-07-24 09:07:44,928 - INFO - 127.0.0.1 - - [24/Jul/2025 09:07:44] "GET / HTTP/1.1" 200 -
-2025-07-24 09:07:44,980 - INFO - 127.0.0.1 - - [24/Jul/2025 09:07:44] "[35m[1mGET /favicon.ico HTTP/1.1[0m" 204 -
-2025-07-24 09:08:17,701 - ERROR - Login failed for admin@10.34.0.2 | Data: {"operation": "login", "username": "admin", "hostname": "10.34.0.2", "success": false, "timestamp": "2025-07-24T09:08:17.701056", "error": "Connection error: HTTPSConnectionPool(host='10.34.0.2', port=443): Max retries exceeded with url: /api/?type=keygen&user=admin&password=Only4NexOT!. (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection object at 0x0000021E1A49DFD0>, 'Connection to 10.34.0.2 timed out. (connect timeout=30)'))"}
-2025-07-24 09:08:17,716 - INFO - 127.0.0.1 - - [24/Jul/2025 09:08:17] "POST / HTTP/1.1" 200 -
-2025-07-24 09:08:17,746 - INFO - 127.0.0.1 - - [24/Jul/2025 09:08:17] "[35m[1mGET /favicon.ico HTTP/1.1[0m" 204 -
