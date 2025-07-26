@@ -1003,7 +1003,7 @@ DASHBOARD_TEMPLATE = '''
         
         var livePollingInterval = null;
         var livePollingAttempts = 0;
-        var maxLivePollingAttempts = 30; // 5 minutes with 10-second intervals
+        var maxLivePollingAttempts = 50; // 8+ minutes with 10-second intervals
         
         function startLivePolling(jobId) {
             console.log('[DEBUG] Starting live polling for job:', jobId);
@@ -1024,12 +1024,12 @@ DASHBOARD_TEMPLATE = '''
                 if (livePollingAttempts >= maxLivePollingAttempts) {
                     console.log('[DEBUG] Live polling timeout after', maxLivePollingAttempts, 'attempts');
                     clearInterval(livePollingInterval);
-                    updateLiveStatus('TIMEOUT', 'unknown', 'Live polling timed out. Please refresh manually.');
+                    updateLiveStatus('TIMEOUT', 'unknown', 'Live polling timed out. Please use the Refresh Status button.');
                     return;
                 }
                 
                 checkCommitStatusLive(jobId);
-            }, 10000); // Check every 10 seconds
+            }, 12000); // Check every 12 seconds (slightly longer intervals)
         }
         
         function checkCommitStatusLive(jobId) {
@@ -1044,12 +1044,21 @@ DASHBOARD_TEMPLATE = '''
                 body: JSON.stringify({job_id: jobId})
             })
             .then(function(response) {
+                console.log('[DEBUG] Live polling response status:', response.status);
+                
+                var contentType = response.headers.get('Content-Type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Non-JSON response from server');
+                }
+                
                 if (!response.ok) {
                     throw new Error('HTTP error! status: ' + response.status);
                 }
                 return response.json();
             })
             .then(function(data) {
+                console.log('[DEBUG] Live polling response data:', data);
+                
                 if (data.success && data.status) {
                     var status = data.status;
                     console.log('[DEBUG] Live status update:', status.status, status.progress + '%');
@@ -1058,73 +1067,98 @@ DASHBOARD_TEMPLATE = '''
                     
                     // Stop polling if completed or failed
                     if (status.status === 'FIN' || status.status === 'FAIL' || status.status === 'ERROR') {
-                        console.log('[DEBUG] Live polling completed with status:', status.status);
+                        console.log('[DEBUG] Live polling completed with final status:', status.status);
                         clearInterval(livePollingInterval);
+                        
+                        // Show final completion message
+                        if (status.status === 'FIN') {
+                            updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
+                        }
                     }
                 } else {
-                    console.log('[DEBUG] Live polling: Invalid response');
-                    updateLiveStatus('ERROR', 'unknown', 'Failed to get status');
+                    console.log('[DEBUG] Live polling: Invalid response structure:', data);
+                    updateLiveStatus('ERROR', 'unknown', 'Invalid response from server');
                 }
             })
             .catch(function(error) {
                 console.error('[DEBUG] Live polling error:', error);
-                updateLiveStatus('ERROR', 'unknown', 'Status check failed: ' + error.message);
+                
+                // Don't stop polling on single errors, but show warning
+                var errorMsg = 'Status check failed: ' + error.message + ' (retrying...)';
+                updateLiveStatus('CHECKING', 'unknown', errorMsg);
+                
+                // Stop polling after too many consecutive errors
+                if (error.message.includes('Non-JSON') || error.message.includes('HTTP error')) {
+                    if (livePollingAttempts > 5) {  // Allow a few retries
+                        console.log('[DEBUG] Too many errors, stopping live polling');
+                        clearInterval(livePollingInterval);
+                        updateLiveStatus('ERROR', 'unknown', 'Multiple status check failures. Please use the Refresh Status button.');
+                    }
+                }
             });
         }
         
         function updateLiveStatus(status, progress, message, error) {
-            var statusSpan = document.querySelector('#liveStatus p:first-child strong:nth-child(2)');
-            var progressText = document.getElementById('progressText');
-            var statusMessage = document.getElementById('statusMessage');
+            console.log('[DEBUG] Updating live status:', status, progress + '%', message);
             
-            if (statusSpan) {
-                var statusColor = 'orange';
-                var statusIcon = '⏳';
-                var statusText = status;
-                
-                if (status === 'FIN') {
-                    statusColor = 'green';
-                    statusIcon = '✅';
-                    statusText = 'COMPLETED';
-                    message = '🎉 Configuration has been successfully committed to the firewall!';
-                } else if (status === 'FAIL' || status === 'ERROR') {
-                    statusColor = 'red';
-                    statusIcon = '❌';
-                    statusText = 'FAILED';
-                    message = '⚠️ Commit failed. Please check firewall logs.';
-                } else if (status === 'ACT') {
-                    statusColor = 'blue';
-                    statusIcon = '🔄';
-                    statusText = 'ACTIVE';
-                    message = '⚙️ Configuration is being applied to the firewall...';
-                } else if (status === 'PEND') {
-                    statusColor = 'orange';
-                    statusIcon = '⏳';
-                    statusText = 'PENDING';
-                    message = '📋 Commit is queued and waiting to start...';
-                } else if (status === 'TIMEOUT') {
-                    statusColor = 'orange';
-                    statusIcon = '⏰';
-                    statusText = 'TIMEOUT';
-                }
-                
-                statusSpan.innerHTML = '<span style="color: ' + statusColor + ';">' + statusIcon + ' ' + statusText + '</span>';
+            var liveStatusDiv = document.getElementById('liveStatus');
+            if (!liveStatusDiv) {
+                console.log('[DEBUG] Live status div not found');
+                return;
             }
             
-            if (progressText) {
-                progressText.textContent = progress + '%';
+            var statusColor = 'orange';
+            var statusIcon = '⏳';
+            var statusText = status;
+            
+            if (status === 'FIN') {
+                statusColor = 'green';
+                statusIcon = '✅';
+                statusText = 'COMPLETED';
+                if (!message) message = '🎉 Configuration has been successfully committed to the firewall!';
+            } else if (status === 'FAIL' || status === 'ERROR') {
+                statusColor = 'red';
+                statusIcon = '❌';
+                statusText = 'FAILED';
+                if (!message) message = '⚠️ Commit failed. Please check firewall logs.';
+            } else if (status === 'ACT') {
+                statusColor = 'blue';
+                statusIcon = '🔄';
+                statusText = 'ACTIVE';
+                if (!message) message = '⚙️ Configuration is being applied to the firewall...';
+            } else if (status === 'PEND') {
+                statusColor = 'orange';
+                statusIcon = '⏳';
+                statusText = 'PENDING';
+                if (!message) message = '📋 Commit is queued and waiting to start...';
+            } else if (status === 'CHECKING') {
+                statusColor = 'blue';
+                statusIcon = '🔄';
+                statusText = 'CHECKING';
+                if (!message) message = '🔍 Checking commit status...';
+            } else if (status === 'TIMEOUT') {
+                statusColor = 'orange';
+                statusIcon = '⏰';
+                statusText = 'TIMEOUT';
+                if (!message) message = '⏰ Live polling timed out. Please check manually.';
             }
             
-            if (statusMessage && message) {
-                statusMessage.innerHTML = message;
-                if (error) {
-                    statusMessage.innerHTML += '<br><small style="color: red;">Error: ' + error + '</small>';
-                }
+            // Update the status display
+            var newStatusHTML = '<p><strong>Status:</strong> <span style="color: ' + statusColor + ';">' + statusIcon + ' ' + statusText + '</span></p>';
+            newStatusHTML += '<p><strong>Progress:</strong> ' + progress + '%</p>';
+            newStatusHTML += '<p id="statusMessage">' + message;
+            
+            if (error) {
+                newStatusHTML += '<br><small style="color: red;">Error: ' + error + '</small>';
             }
+            
+            newStatusHTML += '</p>';
+            
+            liveStatusDiv.innerHTML = newStatusHTML;
         }
         
         function checkCommitStatus(jobId) {
-            console.log('[DEBUG] Checking commit status for job:', jobId);
+            console.log('[DEBUG] Manual commit status check for job:', jobId);
             
             fetch('/commit_status', {
                 method: 'POST',
@@ -1135,7 +1169,7 @@ DASHBOARD_TEMPLATE = '''
                 body: JSON.stringify({job_id: jobId})
             })
             .then(function(response) {
-                console.log('[DEBUG] Commit status response:', response.status);
+                console.log('[DEBUG] Manual status response:', response.status);
                 
                 var contentType = response.headers.get('Content-Type');
                 if (!contentType || !contentType.includes('application/json')) {
@@ -1149,47 +1183,49 @@ DASHBOARD_TEMPLATE = '''
                 return response.json();
             })
             .then(function(data) {
-                console.log('[DEBUG] Commit status data:', data);
+                console.log('[DEBUG] Manual status data:', data);
                 
-                var statusDiv = document.querySelector('.commit-status');
-                if (data.success && statusDiv && data.status) {
+                if (data.success && data.status) {
                     var status = data.status;
-                    var statusHTML = '<h3>🔄 Commit Status (Updated):</h3>';
-                    statusHTML += '<p><strong>Job ID:</strong> ' + jobId + '</p>';
-                    statusHTML += '<p><strong>Status:</strong> ' + status.status + '</p>';
-                    statusHTML += '<p><strong>Progress:</strong> ' + status.progress + '%</p>';
+                    console.log('[DEBUG] Manual status result:', status.status, status.progress + '%');
                     
-                    if (status.status === 'FIN') {
-                        statusHTML += '<p style="color: green;">✅ Commit completed successfully!</p>';
-                    } else if (status.status === 'FAIL' || status.status === 'ERROR') {
-                        statusHTML += '<p style="color: red;">❌ Commit failed</p>';
-                        if (status.error) {
-                            statusHTML += '<p style="color: red; font-size: 12px;">Error: ' + status.error + '</p>';
+                    // Update the live status display
+                    updateLiveStatus(status.status, status.progress, null, status.error);
+                    
+                    // If completed, stop any live polling
+                    if (status.status === 'FIN' || status.status === 'FAIL' || status.status === 'ERROR') {
+                        console.log('[DEBUG] Final status reached, stopping live polling');
+                        if (livePollingInterval) {
+                            clearInterval(livePollingInterval);
                         }
-                    } else if (status.status !== 'FIN') {
-                        statusHTML += '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Refresh Status</button>';
+                        
+                        // Show completion message
+                        if (status.status === 'FIN') {
+                            updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
+                        }
+                    } else {
+                        // Status not complete, restart live polling if not running
+                        if (!livePollingInterval) {
+                            console.log('[DEBUG] Restarting live polling after manual check');
+                            setTimeout(function() {
+                                startLivePolling(jobId);
+                            }, 2000);
+                        }
                     }
-                    
-                    statusDiv.innerHTML = statusHTML;
                 } else {
                     console.error('[DEBUG] Invalid commit status response:', data);
-                    var statusDiv = document.querySelector('.commit-status');
-                    if (statusDiv) {
-                        statusDiv.innerHTML = '<p style="color: orange;">⚠️ Could not get current status. Job may still be processing.</p>';
-                    }
+                    updateLiveStatus('ERROR', 'unknown', 'Could not get current status. Invalid response from server.');
                 }
             })
             .catch(function(error) {
-                console.error('[DEBUG] Commit status check failed:', error);
-                var statusDiv = document.querySelector('.commit-status');
-                if (statusDiv) {
-                    var errorMsg = 'Status check failed: ' + error.message;
-                    if (error.message.includes('non-JSON response')) {
-                        errorMsg = 'Server error: Could not get commit status. The job may still be processing.';
-                    }
-                    statusDiv.innerHTML = '<p style="color: orange;">⚠️ ' + errorMsg + '</p>' +
-                                        '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Try Again</button>';
+                console.error('[DEBUG] Manual commit status check failed:', error);
+                
+                var errorMsg = 'Status check failed: ' + error.message;
+                if (error.message.includes('non-JSON response')) {
+                    errorMsg = 'Server error: Could not get commit status. The job may still be processing.';
                 }
+                
+                updateLiveStatus('ERROR', 'unknown', errorMsg);
             });
         }
         
