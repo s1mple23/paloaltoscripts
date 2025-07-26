@@ -304,6 +304,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔄 Changelog
 
+### v1.5.0 - Enhanced Multi-URL Search
+- Improve commit status and fix issue with commit status.
+
 ### v1.4.0 - Enhanced Multi-URL Search
 - ✨ Added multi-term search with OR logic
 - 📝 Added manual URL input functionality  

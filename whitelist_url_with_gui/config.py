@@ -10,7 +10,7 @@ class ServerConfig:
     
     # Application Info
     APP_NAME = "Palo Alto Firewall URL Whitelisting Tool"
-    VERSION = "1.4.0-server"
+    VERSION = "1.5.0-server"
     DESCRIPTION = "Enhanced Multi-URL Search with Server Support"
     
     # Flask Configuration
