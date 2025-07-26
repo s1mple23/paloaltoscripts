@@ -291,18 +291,47 @@ def register_routes(app: Flask):
             if data is None:
                 return jsonify({'success': False, 'error': 'No JSON data received'})
             
-            # Validate ticket ID
+            # Extract and validate data
             ticket_id = data.get('ticket_id', '').strip()
+            category = data.get('category', '').strip()
+            urls = data.get('urls', [])
+            action_type = data.get('action_type', 'block-url')
+            
+            print(f"[DEBUG] Whitelist submission data: ticket_id='{ticket_id}', category='{category}', urls_count={len(urls)}, action_type='{action_type}'")
+            
+            # Validate ticket ID
             if not validate_ticket_id(ticket_id):
-                return jsonify({'success': False, 'error': 'Invalid ticket ID format'})
+                return jsonify({'success': False, 'error': 'Invalid ticket ID format. Please use alphanumeric characters, hyphens, underscores, and dots only.'})
+            
+            # Validate category
+            if not category:
+                return jsonify({'success': False, 'error': 'Category is required'})
+            
+            # Validate URLs
+            if not urls or len(urls) == 0:
+                return jsonify({'success': False, 'error': 'At least one URL is required'})
+            
+            # Validate each URL
+            from utils.validators import validate_single_url
+            invalid_urls = []
+            for url in urls:
+                if not validate_single_url(str(url)):
+                    invalid_urls.append(str(url))
+            
+            if invalid_urls:
+                return jsonify({'success': False, 'error': f'Invalid URLs found: {", ".join(invalid_urls[:3])}{"..." if len(invalid_urls) > 3 else ""}'})
             
             # Create whitelist request
-            whitelist_request = WhitelistRequest(
-                category=data.get('category'),
-                urls=data.get('urls', []),
-                ticket_id=ticket_id,
-                action_type=data.get('action_type', 'block-url')
-            )
+            try:
+                whitelist_request = WhitelistRequest(
+                    category=category,
+                    urls=urls,
+                    ticket_id=ticket_id,
+                    action_type=action_type
+                )
+            except Exception as e:
+                print(f"[DEBUG] Error creating whitelist request: {e}")
+                return jsonify({'success': False, 'error': f'Invalid request data: {str(e)}'})
             
             # Initialize services
             api_client = PaloAltoAPI(session['hostname'], session['username'], '')
@@ -366,8 +395,20 @@ def register_routes(app: Flask):
                 
         except Exception as e:
             print(f"[DEBUG] Whitelist submission error: {e}")
+            print(f"[DEBUG] Error type: {type(e).__name__}")
+            print(f"[DEBUG] Error details: {str(e)}")
+            
+            # Check for specific error types
+            error_message = str(e)
+            if "string did not match the expected pattern" in error_message.lower():
+                error_message = "Validation error: One of the input values contains invalid characters. Please check your ticket ID, URLs, and category name."
+            elif "invalid" in error_message.lower() and "pattern" in error_message.lower():
+                error_message = "Input validation failed. Please check that your ticket ID uses only letters, numbers, hyphens, and underscores."
+            elif "unicode" in error_message.lower() or "encoding" in error_message.lower():
+                error_message = "Character encoding error. Please ensure all inputs use standard characters only."
+            
             logging_service.log_error("Enhanced whitelist submission failed", e)
-            return jsonify({'success': False, 'error': str(e)})
+            return jsonify({'success': False, 'error': error_message})
 
     @app.route('/commit_status', methods=['POST'])
     def commit_status():

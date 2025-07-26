@@ -717,7 +717,7 @@ function updateFinalSummary() {
 }
 
 /**
- * Submit whitelist request
+ * Submit whitelist request with enhanced error handling
  */
 function submitWhitelist() {
     var ticketId = document.getElementById('ticketId').value.trim();
@@ -732,6 +732,11 @@ function submitWhitelist() {
     
     if (!exactMatch && !wildcardMatch) {
         alert('Please select at least one whitelisting option');
+        return;
+    }
+    
+    if (!categorySelect.value) {
+        alert('Please select a URL category');
         return;
     }
     
@@ -759,6 +764,11 @@ function submitWhitelist() {
         }
     }
     
+    if (urlsToAdd.length === 0) {
+        alert('No URLs to add. Please select some URLs first.');
+        return;
+    }
+    
     var submitBtn = document.getElementById('submitBtn');
     submitBtn.disabled = true;
     submitBtn.textContent = '⏳ Submitting...';
@@ -769,6 +779,8 @@ function submitWhitelist() {
         ticket_id: ticketId,
         action_type: selectedActionType
     };
+    
+    console.log('[DEBUG] Submitting whitelist request:', payload);
     
     // Set timeout for submission
     var submissionTimeout = setTimeout(function() {
@@ -785,27 +797,56 @@ function submitWhitelist() {
                 auto_polled: false
             }
         });
-    }, 30000);
+    }, 45000); // Increased timeout to 45 seconds
     
     fetch('/submit_whitelist', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
         body: JSON.stringify(payload)
     })
     .then(function(response) {
         clearTimeout(submissionTimeout);
+        console.log('[DEBUG] Submit response status:', response.status);
+        
+        // Check if response is JSON
+        var contentType = response.headers.get('Content-Type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response. Expected JSON but got: ' + (contentType || 'unknown'));
+        }
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
         return response.json();
     })
     .then(function(data) {
         clearTimeout(submissionTimeout);
+        console.log('[DEBUG] Submit response data:', data);
         activateStep(5);
         displayResults(data);
     })
     .catch(function(error) {
         clearTimeout(submissionTimeout);
-        var resultsDiv = document.getElementById('results');
-        resultsDiv.innerHTML = '<div class="error">Network error: ' + error.message + '</div>';
+        console.error('[DEBUG] Submit error:', error);
+        
+        var errorMessage = 'Submission failed: ' + error.message;
+        
+        // Provide more helpful error messages
+        if (error.message.includes('non-JSON response')) {
+            errorMessage = 'Server error: The server returned an unexpected response. This might be a validation error or server issue. Please check your inputs and try again.';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'Network error: Could not connect to the server. Please check your connection and try again.';
+        } else if (error.message.includes('string did not match the expected pattern')) {
+            errorMessage = 'Validation error: One of the input values (ticket ID, URLs, or category) contains invalid characters. Please check your inputs and try again.';
+        }
+        
         activateStep(5);
+        var resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
     })
     .finally(function() {
         clearTimeout(submissionTimeout);

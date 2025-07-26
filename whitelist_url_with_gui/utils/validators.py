@@ -1,5 +1,5 @@
 """
-Input validation utilities
+Input validation utilities - Fixed validation patterns
 """
 import re
 from typing import List
@@ -22,7 +22,7 @@ def validate_search_term(search_term: str) -> bool:
         return False
     
     # Check for potentially dangerous characters
-    dangerous_chars = ['<', '>', '&', '"', "'", ';', '()', '--']
+    dangerous_chars = ['<', '>', '&', '"', "'", ';', '--']
     if any(char in search_term for char in dangerous_chars):
         return False
     
@@ -42,7 +42,7 @@ def validate_action_type(action_type: str) -> bool:
 
 def validate_ticket_id(ticket_id: str) -> bool:
     """
-    Validate ticket ID format
+    Validate ticket ID format - More flexible pattern
     
     Args:
         ticket_id: The ticket ID to validate
@@ -53,12 +53,13 @@ def validate_ticket_id(ticket_id: str) -> bool:
     if not ticket_id:
         return False
     
-    # Allow alphanumeric, hyphens, underscores, and dots
-    pattern = r'^[A-Za-z0-9\-_.]+$'
-    if not re.match(pattern, ticket_id):
+    # More flexible pattern - allow most characters except dangerous ones
+    # Allow: letters, numbers, hyphens, underscores, dots, slashes, colons
+    dangerous_chars = ['<', '>', '"', "'", ';', '&', '`', '|', '\\', '*', '?']
+    if any(char in ticket_id for char in dangerous_chars):
         return False
     
-    if len(ticket_id) < 3 or len(ticket_id) > 50:
+    if len(ticket_id) < 3 or len(ticket_id) > 100:  # Increased max length
         return False
     
     return True
@@ -86,7 +87,7 @@ def validate_urls(urls: List[str]) -> tuple[bool, List[str]]:
 
 def validate_single_url(url: str) -> bool:
     """
-    Validate a single URL/domain
+    Validate a single URL/domain - More flexible validation
     
     Args:
         url: The URL/domain to validate
@@ -105,23 +106,41 @@ def validate_single_url(url: str) -> bool:
     if len(url) > config.MAX_URL_LENGTH:
         return False
     
-    # Basic domain/URL pattern validation
-    # Allow domains with or without protocol, with wildcards
-    pattern = r'^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(/.*)?$'
+    # Check for dangerous characters
+    dangerous_chars = ['<', '>', '"', "'", ';', '&', '`', '|', '\\']
+    if any(char in url for char in dangerous_chars):
+        return False
     
-    # Remove common protocols for validation
+    # More flexible domain/URL pattern validation
+    # Allow domains with or without protocol, with wildcards, with paths
     clean_url = url
     if clean_url.startswith(('http://', 'https://')):
         clean_url = clean_url.split('://', 1)[1]
     
-    if not re.match(pattern, clean_url):
+    # Basic checks for valid domain structure
+    if clean_url.startswith('*.'):
+        clean_url = clean_url[2:]  # Remove wildcard
+    
+    # Must contain at least one dot for TLD
+    if '.' not in clean_url:
+        return False
+    
+    # Split by slash to get domain part
+    domain_part = clean_url.split('/')[0]
+    
+    # Basic domain validation - allow most characters
+    if not domain_part or domain_part.startswith('.') or domain_part.endswith('.'):
+        return False
+    
+    # Check for consecutive dots
+    if '..' in domain_part:
         return False
     
     return True
 
 def validate_hostname(hostname: str) -> bool:
     """
-    Validate firewall hostname/IP
+    Validate firewall hostname/IP - More flexible
     
     Args:
         hostname: The hostname or IP to validate
@@ -137,23 +156,34 @@ def validate_hostname(hostname: str) -> bool:
     if len(hostname) < 3 or len(hostname) > 255:
         return False
     
+    # Check for dangerous characters
+    dangerous_chars = ['<', '>', '"', "'", ';', '&', '`', '|', '\\', ' ']
+    if any(char in hostname for char in dangerous_chars):
+        return False
+    
     # Check if it's an IP address
-    ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-    if re.match(ip_pattern, hostname):
+    ip_parts = hostname.split('.')
+    if len(ip_parts) == 4 and all(part.isdigit() for part in ip_parts):
         # Validate IP ranges
-        parts = hostname.split('.')
-        for part in parts:
+        for part in ip_parts:
             if not (0 <= int(part) <= 255):
                 return False
         return True
     
-    # Check if it's a hostname
-    hostname_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
-    return re.match(hostname_pattern, hostname) is not None
+    # Check if it's a hostname - more flexible pattern
+    # Allow letters, numbers, dots, hyphens
+    if not re.match(r'^[a-zA-Z0-9.-]+$', hostname):
+        return False
+    
+    # Must not start or end with dot or hyphen
+    if hostname.startswith(('.', '-')) or hostname.endswith(('.', '-')):
+        return False
+    
+    return True
 
 def validate_credentials(username: str, password: str) -> tuple[bool, str]:
     """
-    Validate login credentials
+    Validate login credentials - More flexible
     
     Args:
         username: Username to validate
@@ -170,15 +200,15 @@ def validate_credentials(username: str, password: str) -> tuple[bool, str]:
     
     username = username.strip()
     
-    if len(username) < 2 or len(username) > 50:
-        return False, "Username must be between 2 and 50 characters"
+    if len(username) < 1 or len(username) > 100:  # More flexible length
+        return False, "Username must be between 1 and 100 characters"
     
     if len(password) < 1:
         return False, "Password cannot be empty"
     
-    # Check for basic username format (alphanumeric, dots, hyphens, underscores)
-    username_pattern = r'^[a-zA-Z0-9._-]+$'
-    if not re.match(username_pattern, username):
+    # Check for dangerous characters in username only
+    dangerous_chars = ['<', '>', '"', "'", ';', '&', '`', '|', '\\']
+    if any(char in username for char in dangerous_chars):
         return False, "Username contains invalid characters"
     
     return True, ""
@@ -212,3 +242,28 @@ def sanitize_filename(filename: str) -> str:
         sanitized = "unknown"
     
     return sanitized.strip()
+
+def validate_category_name(category_name: str) -> bool:
+    """
+    Validate URL category name
+    
+    Args:
+        category_name: The category name to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not category_name:
+        return False
+    
+    category_name = category_name.strip()
+    
+    if len(category_name) < 1 or len(category_name) > 200:
+        return False
+    
+    # Allow most characters except dangerous ones
+    dangerous_chars = ['<', '>', '"', "'", ';', '&', '`', '|', '\\']
+    if any(char in category_name for char in dangerous_chars):
+        return False
+    
+    return True
