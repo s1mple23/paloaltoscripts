@@ -1,17 +1,17 @@
 """
-Enhanced Configuration settings for Palo Alto Whitelist Tool
-Now supports multi-URL search and manual input features
+Production Configuration for Ubuntu Server
+Enhanced logging and output handling
 """
 import os
 from datetime import timedelta
 
-class Config:
-    """Enhanced application configuration"""
+class ServerConfig:
+    """Production server configuration"""
     
     # Application Info
     APP_NAME = "Palo Alto Firewall URL Whitelisting Tool"
-    VERSION = "1.4.0"
-    DESCRIPTION = "Enhanced Multi-URL Search with Manual Input"
+    VERSION = "1.4.0-server"
+    DESCRIPTION = "Enhanced Multi-URL Search with Server Support"
     
     # Flask Configuration
     SECRET_KEY = os.urandom(24)
@@ -21,92 +21,88 @@ class Config:
     SSL_CERT_FILE = 'cert.pem'
     SSL_KEY_FILE = 'key.pem'
     
-    # Server Configuration
-    HOST = '127.0.0.1'
+    # Server Configuration - Production Settings
+    HOST = '0.0.0.0'  # Bind to all interfaces
     PORT = 5010
     DEBUG = False
     
-    # Logging Configuration
+    # Enhanced Logging Configuration for Server
     LOG_DIR = 'logs'
     APP_LOG_FILE = os.path.join(LOG_DIR, 'palo_alto_whitelist.log')
+    SERVER_LOG_FILE = os.path.join(LOG_DIR, 'server.log')
+    ERROR_LOG_FILE = os.path.join(LOG_DIR, 'errors.log')
     LOG_LEVEL = 'INFO'
-    LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
+    LOG_FORMAT = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
     
-    # Enhanced Search Configuration
+    # Server-specific logging
+    SEPARATE_STDOUT_STDERR = True
+    BUFFER_OUTPUT = False  # Disable buffering for real-time logs
+    
+    # Search Configuration
     DEFAULT_MAX_RESULTS = 3000
     LOOKBACK_MONTHS = 3
-    SEARCH_TIMEOUT_ATTEMPTS = [10, 15, 25, 35]  # seconds
-    ATTEMPT_WAIT_TIME = 3  # seconds between attempts
+    SEARCH_TIMEOUT_ATTEMPTS = [15, 25, 35, 45]  # Longer timeouts for server
+    ATTEMPT_WAIT_TIME = 5  # More wait time between attempts
     
     # Multi-URL Search Configuration
-    MAX_SEARCH_TERMS = 10  # Maximum number of search terms allowed
-    SEARCH_TERM_SEPARATOR = ','  # Separator for multiple search terms
-    MIN_SEARCH_TERM_LENGTH_MULTI = 2  # Minimum length for each term in multi-search
+    MAX_SEARCH_TERMS = 10
+    SEARCH_TERM_SEPARATOR = ','
+    MIN_SEARCH_TERM_LENGTH_MULTI = 2
     
     # Manual URL Configuration
-    MAX_MANUAL_URLS = 50  # Maximum number of manually entered URLs
-    MANUAL_URL_SEPARATORS = [',', '\n', '\r\n']  # Separators for manual URL input
-    ALLOW_WILDCARD_MANUAL = True  # Allow wildcard domains in manual input
+    MAX_MANUAL_URLS = 50
+    MANUAL_URL_SEPARATORS = [',', '\n', '\r\n']
+    ALLOW_WILDCARD_MANUAL = True
     
-    # Commit Configuration - INCREASED POLLING
-    COMMIT_MAX_POLLS = 25  # Increased from 10 to 25
-    COMMIT_POLL_INTERVAL = 6  # seconds
-    COMMIT_TIMEOUT = 180  # Increased from 60 to 180 seconds
+    # Commit Configuration - Extended for server
+    COMMIT_MAX_POLLS = 30  # More polling attempts
+    COMMIT_POLL_INTERVAL = 8  # Longer intervals
+    COMMIT_TIMEOUT = 300  # 5 minutes timeout
     
-    # Enhanced URL Validation
+    # URL Validation
     MIN_SEARCH_TERM_LENGTH = 2
     MIN_DOMAIN_LENGTH = 3
     MAX_URL_LENGTH = 500
-    MAX_MANUAL_URL_LENGTH = 200  # Specific limit for manually entered URLs
+    MAX_MANUAL_URL_LENGTH = 200
     
-    # API Configuration
-    API_TIMEOUT = 30  # seconds
-    JOB_CHECK_INTERVAL = 2  # seconds
-    STATUS_CHECK_TIMEOUT = 10  # seconds
+    # API Configuration - Extended timeouts for server
+    API_TIMEOUT = 45  # Longer API timeout
+    JOB_CHECK_INTERVAL = 3  # More conservative
+    STATUS_CHECK_TIMEOUT = 15
     
     # Valid Actions
     VALID_ACTIONS = ['block-url', 'block-continue']
     
-    # URL Sources (fields to check in log entries)
+    # URL Sources
     URL_SOURCES = ['misc', 'url', 'src-location', 'dst-location', 'hostname', 'host']
     
-    # URL Separators (for splitting multiple URLs in one field)
+    # URL Separators
     URL_SEPARATORS = [' ', '\t', '\n', '&r=', '&gdpr_consent=', '?r=']
     
-    # Enhanced Query Building
-    USE_OR_LOGIC_FOR_MULTI_TERMS = True  # Use OR logic for multiple search terms
-    QUERY_OPTIMIZATION = True  # Enable query optimization for better performance
+    # Query Building
+    USE_OR_LOGIC_FOR_MULTI_TERMS = True
+    QUERY_OPTIMIZATION = True
     
-    # Manual URL Validation Patterns
+    # Server-specific settings
+    WERKZEUG_LOG_LEVEL = 'ERROR'  # Minimize Flask logs
+    ENABLE_REQUEST_LOGGING = False  # Disable request logging in production
+    JSON_ENSURE_ASCII = False  # Proper UTF-8 handling
+    
+    # Manual URL Validation
     MANUAL_URL_VALIDATION = {
         'allow_protocols': ['http://', 'https://'],
         'allow_wildcards': ['*.'],
         'forbidden_chars': ['<', '>', '"', "'", '&', ';'],
-        'required_tld': True,  # Require valid TLD for domains
-        'min_dots': 1  # Minimum number of dots in domain
+        'required_tld': True,
+        'min_dots': 1
     }
 
-class DevelopmentConfig(Config):
-    """Development configuration"""
-    DEBUG = True
-    LOG_LEVEL = 'DEBUG'
-    # Allow more lenient validation in development
-    MAX_SEARCH_TERMS = 15
-    MAX_MANUAL_URLS = 100
-    # Even more polling attempts for development
-    COMMIT_MAX_POLLS = 30
-    COMMIT_TIMEOUT = 240
+# Use server config as default
+config = ServerConfig()
 
-class ProductionConfig(Config):
-    """Production configuration"""
-    DEBUG = False
-    LOG_LEVEL = 'INFO'
-    # Stricter limits in production
-    MAX_SEARCH_TERMS = 8
-    MAX_MANUAL_URLS = 30
-    # Increased production polling for better reliability
-    COMMIT_MAX_POLLS = 20
-    COMMIT_TIMEOUT = 150
-
-# Default configuration
-config = Config()
+# Environment-based configuration
+if os.environ.get('FLASK_ENV') == 'development':
+    config.DEBUG = True
+    config.LOG_LEVEL = 'DEBUG'
+    config.HOST = '127.0.0.1'
+    config.ENABLE_REQUEST_LOGGING = True
