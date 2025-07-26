@@ -48,10 +48,10 @@ class Config:
     MANUAL_URL_SEPARATORS = [',', '\n', '\r\n']  # Separators for manual URL input
     ALLOW_WILDCARD_MANUAL = True  # Allow wildcard domains in manual input
     
-    # Commit Configuration
-    COMMIT_MAX_POLLS = 10
+    # Commit Configuration - INCREASED POLLING
+    COMMIT_MAX_POLLS = 25  # Increased from 10 to 25
     COMMIT_POLL_INTERVAL = 6  # seconds
-    COMMIT_TIMEOUT = 60  # seconds
+    COMMIT_TIMEOUT = 180  # Increased from 60 to 180 seconds
     
     # Enhanced URL Validation
     MIN_SEARCH_TERM_LENGTH = 2
@@ -93,6 +93,9 @@ class DevelopmentConfig(Config):
     # Allow more lenient validation in development
     MAX_SEARCH_TERMS = 15
     MAX_MANUAL_URLS = 100
+    # Even more polling attempts for development
+    COMMIT_MAX_POLLS = 30
+    COMMIT_TIMEOUT = 240
 
 class ProductionConfig(Config):
     """Production configuration"""
@@ -101,6 +104,9 @@ class ProductionConfig(Config):
     # Stricter limits in production
     MAX_SEARCH_TERMS = 8
     MAX_MANUAL_URLS = 30
+    # Increased production polling for better reliability
+    COMMIT_MAX_POLLS = 20
+    COMMIT_TIMEOUT = 150
 
 # Default configuration
 config = Config()

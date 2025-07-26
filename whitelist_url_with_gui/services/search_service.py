@@ -1,6 +1,7 @@
 """
 URL Search Service
 Handles targeted URL searching with multiple search terms and manual URL addition
+Improved error handling and timeout management
 """
 from datetime import datetime, timedelta
 from typing import List, Set
@@ -67,8 +68,8 @@ class SearchService:
             # Build the multi-term OR query
             base_query = self._build_multi_term_query(parsed_terms, action_type, time_filter)
             
-            # Execute multiple timeout attempts
-            attempts = self._execute_timeout_attempts(base_query, search_terms, blocked_urls)
+            # Execute multiple timeout attempts with better error handling
+            attempts = self._execute_timeout_attempts_improved(base_query, search_terms, blocked_urls)
             
             # Prepare results
             final_urls = sorted(list(blocked_urls))
@@ -80,7 +81,7 @@ class SearchService:
                 'original_input': search_terms,
                 'action_type': action_type,
                 'results_found': len(final_urls),
-                'search_strategy': 'multi_term_or_logic_multiple_timeouts',
+                'search_strategy': 'multi_term_or_logic_multiple_timeouts_improved',
                 'lookback_period': f'{config.LOOKBACK_MONTHS}_months',
                 'max_entries': config.DEFAULT_MAX_RESULTS,
                 'successful_attempts': f'{successful_attempts}/{len(attempts)}',
@@ -92,12 +93,15 @@ class SearchService:
             print(f"[DEBUG] Search terms used: {parsed_terms}")
             print(f"[DEBUG] Found URLs: {final_urls}")
             
+            # Consider partial success if we found some URLs even if not all attempts succeeded
+            is_success = len(final_urls) > 0 or successful_attempts > 0
+            
             return SearchResult(
                 urls=final_urls,
                 search_term=search_terms,
                 action_type=action_type,
                 strategy_info=strategy_info,
-                success=True
+                success=is_success
             )
             
         except Exception as e:
@@ -147,13 +151,13 @@ class SearchService:
         print(f"[DEBUG] Built query: {query}")
         return query
     
-    def _execute_timeout_attempts(self, base_query: str, search_terms: str, blocked_urls: Set[str]) -> List[SearchAttempt]:
-        """Execute multiple timeout attempts for reliability"""
+    def _execute_timeout_attempts_improved(self, base_query: str, search_terms: str, blocked_urls: Set[str]) -> List[SearchAttempt]:
+        """Execute multiple timeout attempts with improved error handling"""
         attempts = []
         
-        print(f"[DEBUG] Starting {len(config.SEARCH_TIMEOUT_ATTEMPTS)} timeout attempts")
+        print(f"[DEBUG] Starting {len(config.SEARCH_TIMEOUT_ATTEMPTS)} timeout attempts (improved)")
         print(f"[DEBUG] Query: {base_query}")
-        print(f"[DEBUG] ⏱️ Total estimated time: ~2 minutes")
+        print(f"[DEBUG] ⏱️ Total estimated time: ~3-4 minutes")
         
         for attempt_num, timeout in enumerate(config.SEARCH_TIMEOUT_ATTEMPTS, 1):
             print(f"[DEBUG] === ATTEMPT {attempt_num}/{len(config.SEARCH_TIMEOUT_ATTEMPTS)}: Timeout {timeout}s ===")
@@ -164,7 +168,7 @@ class SearchService:
                 time.sleep(config.ATTEMPT_WAIT_TIME)
             
             urls_before = len(blocked_urls)
-            attempt = self._execute_single_attempt(
+            attempt = self._execute_single_attempt_improved(
                 base_query, 
                 search_terms, 
                 blocked_urls, 
@@ -181,8 +185,12 @@ class SearchService:
             
             if attempt.success:
                 print(f"[DEBUG] ✅ Attempt {attempt_num} SUCCESS: Added {urls_added} URLs (Total: {len(blocked_urls)})")
+                # If we got good results and have multiple attempts left, we might stop early
+                if len(blocked_urls) >= 10 and attempt_num < len(config.SEARCH_TIMEOUT_ATTEMPTS):
+                    print(f"[DEBUG] Got {len(blocked_urls)} URLs, considering early success...")
             else:
                 print(f"[DEBUG] ❌ Attempt {attempt_num} FAILED: Added {urls_added} URLs (Total: {len(blocked_urls)})")
+                print(f"[DEBUG] Error: {attempt.error}")
             
             # Show current progress
             if len(blocked_urls) > 0:
@@ -190,9 +198,9 @@ class SearchService:
         
         return attempts
     
-    def _execute_single_attempt(self, query: str, search_terms: str, blocked_urls: Set[str], 
-                               timeout: int, nlogs: int, attempt_name: str) -> SearchAttempt:
-        """Execute a single search attempt"""
+    def _execute_single_attempt_improved(self, query: str, search_terms: str, blocked_urls: Set[str], 
+                                       timeout: int, nlogs: int, attempt_name: str) -> SearchAttempt:
+        """Execute a single search attempt with improved error handling"""
         print(f"[DEBUG] {attempt_name}: Executing query with {timeout}s timeout, {nlogs} max logs")
         
         attempt = SearchAttempt(
@@ -203,8 +211,11 @@ class SearchService:
         )
         
         try:
-            # Execute the log query
-            result = self.api_client.execute_log_query(query, nlogs, timeout)
+            # Execute the log query with extended timeout for API calls
+            extended_timeout = timeout + 10  # Give API client more time
+            print(f"[DEBUG] {attempt_name}: Using extended timeout of {extended_timeout}s for API call")
+            
+            result = self.api_client.execute_log_query(query, nlogs, extended_timeout)
             
             if result['type'] == 'direct':
                 print(f"[DEBUG] {attempt_name}: DIRECT results - {len(result['entries'])} entries")
@@ -212,12 +223,15 @@ class SearchService:
                 if matches_found > 0:
                     attempt.success = True
                     print(f"[DEBUG] {attempt_name}: Direct query successful - {matches_found} matches")
+                else:
+                    attempt.error = "No matching URLs found in direct results"
             
             elif result['type'] == 'job':
                 job_id = result['job_id']
                 print(f"[DEBUG] {attempt_name}: Job {job_id} queued (will wait {timeout}s)")
                 
-                job_results = self.api_client.wait_for_job(job_id, timeout, attempt_name)
+                # Use extended timeout for job waiting as well
+                job_results = self.api_client.wait_for_job(job_id, extended_timeout, attempt_name)
                 if job_results:
                     logs = job_results.findall('.//entry')
                     print(f"[DEBUG] {attempt_name}: Job successful - {len(logs)} entries")
@@ -227,17 +241,32 @@ class SearchService:
                         if matches_found > 0:
                             attempt.success = True
                             print(f"[DEBUG] {attempt_name}: Job successful - {matches_found} matches")
+                        else:
+                            attempt.error = "No matching URLs found in job results"
+                    else:
+                        attempt.error = "Job completed but returned no log entries"
                 else:
-                    print(f"[DEBUG] {attempt_name}: Job failed or timed out after {timeout}s")
+                    print(f"[DEBUG] {attempt_name}: Job failed or timed out after {extended_timeout}s")
                     attempt.error = "Job timeout or failure"
             
             elif result['type'] == 'empty':
                 print(f"[DEBUG] {attempt_name}: Empty result")
-                attempt.error = "Empty result"
+                attempt.error = "Empty result from firewall"
+            else:
+                attempt.error = f"Unknown result type: {result.get('type', 'unknown')}"
         
         except Exception as e:
             print(f"[DEBUG] {attempt_name}: Exception - {e}")
-            attempt.error = str(e)
+            # Try to provide more specific error messages
+            error_str = str(e).lower()
+            if "timeout" in error_str:
+                attempt.error = f"Request timeout after {timeout}s"
+            elif "connection" in error_str:
+                attempt.error = f"Connection error: {str(e)}"
+            elif "authentication" in error_str or "unauthorized" in error_str:
+                attempt.error = f"Authentication error: {str(e)}"
+            else:
+                attempt.error = str(e)
         
         return attempt
     

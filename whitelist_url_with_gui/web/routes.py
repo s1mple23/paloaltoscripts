@@ -1,9 +1,11 @@
 """
 Enhanced Flask routes for the web interface
-Supports multiple search terms and manual URL validation
+Fixed JSON response issues and improved error handling
 """
 from flask import Flask, render_template_string, request, session, redirect, url_for, flash, jsonify
 from datetime import datetime
+import traceback
+import json
 
 from config import config
 from api.palo_alto_client import PaloAltoAPI, PaloAltoAPIError
@@ -75,17 +77,49 @@ def register_routes(app: Flask):
         if 'api_key' not in session:
             return redirect(url_for('login'))
         
-        return render_template_string(get_dashboard_template(), config=config)
+        return render_template_string(get_dashboard_template(), 
+                                    config=config, 
+                                    session=session)
+
+    @app.route('/static/js/dashboard.js')
+    def dashboard_js():
+        """Serve dashboard JavaScript file"""
+        from flask import Response
+        try:
+            with open('static/js/dashboard.js', 'r') as f:
+                js_content = f.read()
+            return Response(js_content, mimetype='application/javascript')
+        except FileNotFoundError:
+            # Return the embedded JS content if file doesn't exist
+            js_content = """
+            // Embedded dashboard JavaScript
+            console.log('[DEBUG] Using embedded dashboard.js');
+            // Add your dashboard.js content here if static file is missing
+            """
+            return Response(js_content, mimetype='application/javascript')
 
     @app.route('/search_urls', methods=['POST'])
     def search_urls():
+        """Enhanced URL search with better error handling"""
         if 'api_key' not in session:
             return jsonify({'success': False, 'error': 'Not authenticated'})
         
         try:
+            # Validate request content type
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+            
             data = request.get_json()
-            search_terms = data.get('search_term', '').strip()  # Now supports multiple terms
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
+                
+            search_terms = data.get('search_term', '').strip()
             action_type = data.get('action_type', 'block-url')
+            
+            print(f"[DEBUG] Search request: terms='{search_terms}', action='{action_type}'")
+            
+            if not search_terms:
+                return jsonify({'success': False, 'error': 'Search terms are required'})
             
             # Initialize services
             api_client = PaloAltoAPI(session['hostname'], session['username'], '')
@@ -93,19 +127,24 @@ def register_routes(app: Flask):
             search_service = SearchService(api_client)
             
             # Test connectivity first
+            print("[DEBUG] Testing API connectivity...")
             connectivity = api_client.test_connectivity()
             if not connectivity['success']:
                 return jsonify({
                     'success': False, 
-                    'error': f"API connectivity failed: {connectivity['error']}"
+                    'error': f"API connectivity failed: {connectivity.get('error', 'Unknown error')}"
                 })
+            
+            print("[DEBUG] API connectivity OK, starting search...")
             
             # Execute enhanced search with multiple terms support
             search_result = search_service.search_blocked_urls(search_terms, action_type)
             
             # Parse terms for logging
-            parsed_terms = search_terms.split(',') if ',' in search_terms else [search_terms]
-            terms_count = len([t.strip() for t in parsed_terms if t.strip()])
+            parsed_terms = [t.strip() for t in search_terms.split(',') if t.strip()]
+            terms_count = len(parsed_terms)
+            
+            print(f"[DEBUG] Search completed: success={search_result.success}, urls_found={len(search_result.urls)}")
             
             # Log search operation
             logging_service.log_search_operation(
@@ -121,7 +160,7 @@ def register_routes(app: Flask):
                            f"{strategy_info.get('search_strategy', 'unknown')} strategy, " \
                            f"found {len(search_result.urls)} matching domains"
                 
-                return jsonify({
+                response_data = {
                     'success': True,
                     'urls': search_result.urls,
                     'count': len(search_result.urls),
@@ -129,10 +168,13 @@ def register_routes(app: Flask):
                     'action_type': search_result.action_type,
                     'strategy_info': strategy_info,
                     'debug_info': debug_info
-                })
+                }
+                
+                print(f"[DEBUG] Returning success response with {len(search_result.urls)} URLs")
+                return jsonify(response_data)
             else:
                 # Provide helpful error messages
-                error_msg = search_result.error
+                error_msg = search_result.error or "Unknown search error"
                 if "timeout" in error_msg.lower():
                     error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
                 elif "connection" in error_msg.lower():
@@ -142,9 +184,15 @@ def register_routes(app: Flask):
                 elif "no valid search terms" in error_msg.lower():
                     error_msg = "Please provide valid search terms. Use comma-separated values for multiple terms."
                 
+                print(f"[DEBUG] Returning error response: {error_msg}")
                 return jsonify({'success': False, 'error': error_msg})
             
+        except json.JSONDecodeError as e:
+            print(f"[DEBUG] JSON decode error: {e}")
+            return jsonify({'success': False, 'error': 'Invalid JSON format in request'})
         except Exception as e:
+            print(f"[DEBUG] Unexpected error in search_urls: {e}")
+            print(f"[DEBUG] Traceback: {traceback.format_exc()}")
             logging_service.log_error(f"Enhanced search URLs failed for {session.get('username', 'unknown')}@{session.get('hostname', 'unknown')}", e)
             return jsonify({'success': False, 'error': f"Search failed: {str(e)}"})
 
@@ -155,7 +203,13 @@ def register_routes(app: Flask):
             return jsonify({'success': False, 'error': 'Not authenticated'})
         
         try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+                
             data = request.get_json()
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
+                
             manual_urls = data.get('manual_urls', '').strip()
             
             if not manual_urls:
@@ -193,6 +247,7 @@ def register_routes(app: Flask):
             })
             
         except Exception as e:
+            print(f"[DEBUG] Manual URL validation error: {e}")
             logging_service.log_error("Manual URL validation failed", e)
             return jsonify({'success': False, 'error': f"Validation failed: {str(e)}"})
 
@@ -215,6 +270,7 @@ def register_routes(app: Flask):
             })
             
         except Exception as e:
+            print(f"[DEBUG] Category retrieval error: {e}")
             logging_service.log_error("Category retrieval failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
@@ -224,7 +280,12 @@ def register_routes(app: Flask):
             return jsonify({'success': False, 'error': 'Not authenticated'})
         
         try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+                
             data = request.get_json()
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
             
             # Validate ticket ID
             ticket_id = data.get('ticket_id', '').strip()
@@ -300,6 +361,7 @@ def register_routes(app: Flask):
                 return jsonify({'success': False, 'error': message})
                 
         except Exception as e:
+            print(f"[DEBUG] Whitelist submission error: {e}")
             logging_service.log_error("Enhanced whitelist submission failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
@@ -309,7 +371,13 @@ def register_routes(app: Flask):
             return jsonify({'success': False, 'error': 'Not authenticated'})
         
         try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+                
             data = request.get_json()
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
+                
             job_id = data.get('job_id')
             
             if not job_id:
@@ -328,6 +396,7 @@ def register_routes(app: Flask):
             })
             
         except Exception as e:
+            print(f"[DEBUG] Commit status check error: {e}")
             logging_service.log_error("Commit status check failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
@@ -361,6 +430,7 @@ def register_routes(app: Flask):
             })
             
         except Exception as e:
+            print(f"[DEBUG] Debug logs error: {e}")
             logging_service.log_error("Debug logs failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
