@@ -214,8 +214,11 @@ DASHBOARD_TEMPLATE = '''
         <h2><span class="step-number">4</span>Change Ticket & Submit</h2>
         
         <div class="form-group">
-            <label for="ticketId">Change/Ticket ID:</label>
-            <input type="text" id="ticketId" name="ticketId" required placeholder="e.g., CHG-2024-001234">
+            <label for="ticketId">Change/Ticket ID (optional):</label>
+            <input type="text" id="ticketId" name="ticketId" placeholder="e.g., CHG-2024-001234 (auto-generated if empty)">
+            <small style="color: #666; font-size: 12px;">
+                💡 Leave empty to auto-generate: Ticket-27JUL2025-14:30:25
+            </small>
         </div>
         
         <div id="finalSummary"></div>
@@ -793,10 +796,7 @@ DASHBOARD_TEMPLATE = '''
         
         function submitWhitelist() {
             var ticketId = document.getElementById('ticketId').value.trim();
-            if (!ticketId) {
-                alert('Please enter a Change/Ticket ID');
-                return;
-            }
+            // Ticket ID is now optional - will be auto-generated if empty
             
             var categorySelect = document.getElementById('urlCategory');
             var exactMatch = document.getElementById('exactMatch').checked;
@@ -916,11 +916,26 @@ DASHBOARD_TEMPLATE = '''
             });
         }
         
+        // Global variables for ticket log creation
+        var pendingTicketData = null;
+        
         function displayResults(data) {
             var resultsDiv = document.getElementById('results');
             
             if (data.success) {
                 var html = '<div class="success">' + data.message + '</div>';
+                
+                // Store ticket data if log creation is pending
+                if (data.ticket_log_pending && data.commit_job_id) {
+                    pendingTicketData = {
+                        ticket_id: extractTicketIdFromResponse(data),
+                        category: extractCategoryFromResponse(data),
+                        urls_added: extractUrlsFromResponse(data),
+                        action_type: selectedActionType,
+                        commit_job_id: data.commit_job_id
+                    };
+                    console.log('[DEBUG] Stored pending ticket data:', pendingTicketData);
+                }
                 
                 // Show commit status with live updates for immediate responses
                 if (data.commit_job_id) {
@@ -987,11 +1002,26 @@ DASHBOARD_TEMPLATE = '''
                     html += '</div>';
                 }
                 
+                // Show ticket log section (will be populated after completion)
+                html += '<div id="ticketLogSection" style="display: none;">';
+                html += '</div>';
+                
+                // Show existing ticket log if available
                 if (data.ticket_log_file) {
                     html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
                     html += '<h3>📋 Ticket Log Created:</h3>';
                     html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
-                    html += '<p>✅ Individual ticket log created for audit trail</p>';
+                    
+                    // Extract ticket ID from log filename for download
+                    var ticketMatch = data.ticket_log_file.match(/ticket_([^_]+)_/);
+                    if (ticketMatch && ticketMatch[1]) {
+                        var ticketForDownload = ticketMatch[1];
+                        html += '<p>✅ Individual ticket log created for audit trail</p>';
+                        html += '<button class="btn btn-secondary" onclick="downloadLog(\'' + ticketForDownload + '\')" style="margin-top: 10px;">📥 Download Log File</button>';
+                    } else {
+                        html += '<p>✅ Individual ticket log created for audit trail</p>';
+                    }
+                    
                     html += '</div>';
                 }
                 
@@ -999,6 +1029,32 @@ DASHBOARD_TEMPLATE = '''
             } else {
                 resultsDiv.innerHTML = '<div class="error">Error: ' + (data.error || 'Unknown error occurred') + '</div>';
             }
+        }
+        
+        function extractTicketIdFromResponse(data) {
+            // Try to extract ticket ID from the message or other response data
+            var message = data.message || '';
+            var ticketMatch = message.match(/Ticket-[^\\s]+/);
+            if (ticketMatch) {
+                return ticketMatch[0];
+            }
+            // Fallback to auto-generated format
+            return 'AUTO-GENERATED';
+        }
+        
+        function extractCategoryFromResponse(data) {
+            // Try to extract category from message
+            var message = data.message || '';
+            var categoryMatch = message.match(/added to ([^\\s]+)/);
+            if (categoryMatch) {
+                return categoryMatch[1];
+            }
+            return 'UNKNOWN';
+        }
+        
+        function extractUrlsFromResponse(data) {
+            // Use stored selected URLs
+            return selectedUrls || [];
         }
         
         var livePollingInterval = null;
@@ -1073,6 +1129,11 @@ DASHBOARD_TEMPLATE = '''
                         // Show final completion message
                         if (status.status === 'FIN') {
                             updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
+                            
+                            // Create final ticket log now that commit is complete
+                            if (pendingTicketData) {
+                                createFinalTicketLog(status);
+                            }
                         }
                     }
                 } else {
@@ -1202,6 +1263,11 @@ DASHBOARD_TEMPLATE = '''
                         // Show completion message
                         if (status.status === 'FIN') {
                             updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
+                            
+                            // Create final ticket log now that commit is complete
+                            if (pendingTicketData) {
+                                createFinalTicketLog(status);
+                            }
                         }
                     } else {
                         // Status not complete, restart live polling if not running
@@ -1231,6 +1297,94 @@ DASHBOARD_TEMPLATE = '''
         
         function startOver() {
             window.location.reload();
+        }
+        
+        function createFinalTicketLog(finalStatus) {
+            console.log('[DEBUG] Creating final ticket log with status:', finalStatus);
+            
+            if (!pendingTicketData) {
+                console.log('[DEBUG] No pending ticket data available');
+                return;
+            }
+            
+            var logData = {
+                ticket_id: pendingTicketData.ticket_id,
+                category: pendingTicketData.category,
+                context: 'unknown',
+                urls_added: pendingTicketData.urls_added,
+                action_type: pendingTicketData.action_type,
+                commit_job_id: pendingTicketData.commit_job_id,
+                commit_status: finalStatus.status,
+                commit_progress: finalStatus.progress
+            };
+            
+            fetch('/create_final_log', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify(logData)
+            })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                console.log('[DEBUG] Final ticket log creation response:', data);
+                
+                if (data.success && data.ticket_log_file) {
+                    // Show the ticket log section
+                    var logSection = document.getElementById('ticketLogSection');
+                    if (logSection) {
+                        var ticketMatch = data.ticket_log_file.match(/ticket_([^_]+)_/);
+                        var ticketForDownload = ticketMatch ? ticketMatch[1] : pendingTicketData.ticket_id;
+                        
+                        logSection.innerHTML = '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">' +
+                                             '<h3>📋 Final Ticket Log Created:</h3>' +
+                                             '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>' +
+                                             '<p>✅ Complete audit trail with final commit status</p>' +
+                                             '<button class="btn btn-secondary" onclick="downloadLog(\'' + ticketForDownload + '\')" style="margin-top: 10px;">📥 Download Final Log</button>' +
+                                             '</div>';
+                        logSection.style.display = 'block';
+                    }
+                    
+                    // Clear pending data
+                    pendingTicketData = null;
+                }
+            })
+            .catch(function(error) {
+                console.error('[DEBUG] Final ticket log creation failed:', error);
+                // Show error but don't fail the whole process
+                var logSection = document.getElementById('ticketLogSection');
+                if (logSection) {
+                    logSection.innerHTML = '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">' +
+                                         '<h3>⚠️ Ticket Log Warning</h3>' +
+                                         '<p>Final ticket log could not be created automatically.</p>' +
+                                         '<p>URLs were successfully whitelisted and committed.</p>' +
+                                         '</div>';
+                    logSection.style.display = 'block';
+                }
+            });
+        }
+        
+        function downloadLog(ticketId) {
+            console.log('[DEBUG] Downloading log for ticket:', ticketId);
+            
+            // Create download URL
+            var downloadUrl = '/download_log/' + encodeURIComponent(ticketId);
+            
+            // Create a temporary link element and trigger download
+            var link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = ''; // Let server set filename
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            console.log('[DEBUG] Download initiated for:', downloadUrl);
         }
         
         console.log('[DEBUG] Dashboard script loaded successfully');

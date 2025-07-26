@@ -296,11 +296,18 @@ def register_routes(app: Flask):
             urls = data.get('urls', [])
             action_type = data.get('action_type', 'block-url')
             
+            # Auto-generate ticket ID if empty
+            if not ticket_id:
+                from datetime import datetime
+                now = datetime.now()
+                ticket_id = f"Ticket-{now.strftime('%d%b%Y-%H:%M:%S').upper()}"
+                print(f"[DEBUG] Auto-generated ticket ID: {ticket_id}")
+            
             print(f"[DEBUG] Whitelist submission data: ticket_id='{ticket_id}', category='{category}', urls_count={len(urls)}, action_type='{action_type}'")
             
-            # Validate ticket ID
-            if not validate_ticket_id(ticket_id):
-                return jsonify({'success': False, 'error': 'Invalid ticket ID format. Please use alphanumeric characters, hyphens, underscores, and dots only.'})
+            # Validate ticket ID (more lenient now)
+            if len(ticket_id) < 3 or len(ticket_id) > 100:
+                return jsonify({'success': False, 'error': 'Ticket ID must be between 3 and 100 characters'})
             
             # Validate category
             if not category:
@@ -483,7 +490,104 @@ def register_routes(app: Flask):
         from flask import Response
         return Response(status=204)  # No content
 
-    @app.route('/logout')
-    def logout():
-        session.clear()
-        return redirect(url_for('login'))
+    @app.route('/create_final_log', methods=['POST'])
+    def create_final_log():
+        """Create final ticket log after commit completion"""
+        if 'api_key' not in session:
+            return jsonify({'success': False, 'error': 'Not authenticated'})
+        
+        try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+                
+            data = request.get_json()
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
+            
+            # Extract data for ticket log creation
+            ticket_id = data.get('ticket_id')
+            category = data.get('category')
+            context = data.get('context', 'unknown')
+            urls_added = data.get('urls_added', [])
+            action_type = data.get('action_type', 'block-url')
+            commit_job_id = data.get('commit_job_id')
+            commit_status = data.get('commit_status', 'COMPLETED')
+            commit_progress = data.get('commit_progress', '100')
+            
+            if not ticket_id or not category:
+                return jsonify({'success': False, 'error': 'Missing required data for log creation'})
+            
+            # Create ticket data with final commit status
+            ticket_data = TicketData(
+                ticket_id=ticket_id,
+                username=session['username'],
+                hostname=session['hostname'],
+                category=category,
+                context=context,
+                urls_added=urls_added,
+                success=True,
+                commit_job_id=commit_job_id,
+                commit_status=commit_status,
+                commit_progress=commit_progress,
+                action_type=action_type
+            )
+            
+            # Create final ticket log
+            ticket_log_file = logging_service.create_ticket_log(ticket_data)
+            
+            # Log the completion
+            logging_service.log_whitelist_operation(ticket_data)
+            logging_service.log_info(f"Final ticket log created for {ticket_id} after commit completion")
+            
+            return jsonify({
+                'success': True,
+                'ticket_log_file': ticket_log_file,
+                'message': 'Final ticket log created successfully'
+            })
+            
+        except Exception as e:
+            print(f"[DEBUG] Final log creation error: {e}")
+            logging_service.log_error("Final ticket log creation failed", e)
+            return jsonify({'success': False, 'error': str(e)})
+        """Download ticket log file"""
+        if 'api_key' not in session:
+            return redirect(url_for('login'))
+        
+        try:
+            import os
+            from flask import send_file, abort
+            from utils.validators import sanitize_filename
+            
+            # Sanitize ticket ID for filename search
+            safe_ticket_id = sanitize_filename(ticket_id)
+            
+            # Search for log file
+            log_files = []
+            if os.path.exists(config.LOG_DIR):
+                for filename in os.listdir(config.LOG_DIR):
+                    if filename.startswith(f'ticket_{safe_ticket_id}_') and filename.endswith('.log'):
+                        log_files.append(filename)
+            
+            if not log_files:
+                abort(404)  # File not found
+            
+            # Use the most recent log file if multiple exist
+            log_files.sort(reverse=True)
+            log_filename = log_files[0]
+            log_path = os.path.join(config.LOG_DIR, log_filename)
+            
+            if not os.path.exists(log_path):
+                abort(404)
+            
+            logging_service.log_info(f"Log download requested by {session['username']}: {log_filename}")
+            
+            return send_file(
+                log_path,
+                as_attachment=True,
+                download_name=log_filename,
+                mimetype='text/plain'
+            )
+            
+        except Exception as e:
+            logging_service.log_error("Log download failed", e)
+            abort(500)
