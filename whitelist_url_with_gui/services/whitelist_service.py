@@ -25,7 +25,7 @@ class WhitelistService:
     
     def submit_whitelist_request(self, request: WhitelistRequest) -> Tuple[bool, str, Dict[str, Any]]:
         """
-        Submit a whitelist request
+        Submit a whitelist request with immediate response
         
         Args:
             request: WhitelistRequest object
@@ -52,10 +52,37 @@ class WhitelistService:
             if not update_success:
                 return False, update_message, {}
             
-            # Commit changes with improved error handling
-            commit_data = self._handle_commit_improved()
-            
-            return True, update_message, commit_data
+            # Start commit but don't wait for completion on server
+            print("[DEBUG] Starting commit operation...")
+            try:
+                commit_success, job_id = self.api_client.commit_changes()
+                if commit_success:
+                    print(f"[DEBUG] Commit job {job_id} started successfully")
+                    # Return immediately with job info, don't wait for polling
+                    commit_data = {
+                        'commit_job_id': job_id,
+                        'commit_status': 'SUBMITTED',
+                        'commit_progress': '0',
+                        'auto_commit_status': {
+                            'status': 'SUBMITTED',
+                            'progress': '0',
+                            'auto_polled': False,
+                            'polling_completed': False,
+                            'message': 'Commit started successfully. Use live polling to track progress.'
+                        },
+                        'immediate_response': True  # Flag to indicate this is immediate response
+                    }
+                    return True, f"{update_message} Commit job {job_id} started.", commit_data
+                else:
+                    return False, "URLs updated but commit failed to start", {'commit_job_id': None}
+                    
+            except Exception as commit_error:
+                print(f"[DEBUG] Commit start failed: {commit_error}")
+                # URLs were updated successfully, but commit failed
+                return True, f"{update_message} Warning: Commit could not be started automatically.", {
+                    'commit_job_id': None,
+                    'commit_error': str(commit_error)
+                }
             
         except Exception as e:
             print(f"[DEBUG] Whitelist request exception: {e}")

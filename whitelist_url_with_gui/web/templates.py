@@ -854,22 +854,11 @@ DASHBOARD_TEMPLATE = '''
             
             console.log('[DEBUG] Submitting whitelist request:', payload);
             
-            // Set timeout for submission
+            // Set timeout for submission - increased for server environment
             var submissionTimeout = setTimeout(function() {
-                console.log('[DEBUG] Submission taking longer than expected');
-                activateStep(5);
-                displayResults({
-                    success: true,
-                    message: 'Whitelist submission in progress...',
-                    timeout_occurred: true,
-                    commit_job_id: 'pending',
-                    auto_commit_status: {
-                        status: 'PROCESSING',
-                        progress: 'unknown',
-                        auto_polled: false
-                    }
-                });
-            }, 45000);
+                console.log('[DEBUG] Submission taking longer than expected - this is normal for server environment');
+                // Don't show timeout message immediately, the server might still be processing
+            }, 30000);
             
             fetch('/submit_whitelist', {
                 method: 'POST',
@@ -907,7 +896,7 @@ DASHBOARD_TEMPLATE = '''
                 var errorMessage = 'Submission failed: ' + error.message;
                 
                 if (error.message.includes('non-JSON response')) {
-                    errorMessage = 'Server error: The server returned an unexpected response. This might be a validation error or server issue. Please check your inputs and try again.';
+                    errorMessage = 'Server error: The server returned an unexpected response. The submission may still be processing in the background. Please check the commit status manually.';
                 } else if (error.message.includes('Failed to fetch')) {
                     errorMessage = 'Network error: Could not connect to the server. Please check your connection and try again.';
                 } else if (error.message.includes('string did not match the expected pattern')) {
@@ -916,7 +905,9 @@ DASHBOARD_TEMPLATE = '''
                 
                 activateStep(5);
                 var resultsDiv = document.getElementById('results');
-                resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
+                resultsDiv.innerHTML = '<div class="error">' + errorMessage + 
+                                     '<br><br><strong>Note:</strong> If you see this error on a server, the whitelist operation may have succeeded in the background. ' +
+                                     'Check the server logs for confirmation.</div>';
             })
             .finally(function() {
                 clearTimeout(submissionTimeout);
@@ -931,39 +922,25 @@ DASHBOARD_TEMPLATE = '''
             if (data.success) {
                 var html = '<div class="success">' + data.message + '</div>';
                 
-                // Handle timeout case
-                if (data.timeout_occurred) {
-                    html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-                    html += '<h3>⏳ Submission In Progress</h3>';
-                    html += '<p>Your whitelist request is being processed. This may take a few minutes.</p>';
-                    html += '<p><strong>What happens next:</strong></p>';
-                    html += '<ul>';
-                    html += '<li>URLs are being added to the category</li>';
-                    html += '<li>Configuration is being committed to the firewall</li>';
-                    html += '<li>Changes will be active once commit completes</li>';
-                    html += '</ul>';
-                    html += '</div>';
-                    
-                    if (data.ticket_log_file) {
-                        html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-                        html += '<h3>📋 Ticket Log Created:</h3>';
-                        html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
-                        html += '<p>✅ Individual ticket log created for audit trail</p>';
-                        html += '</div>';
-                    }
-                    
-                    resultsDiv.innerHTML = html;
-                    return;
-                }
-                
-                // Show commit status with live updates
+                // Show commit status with live updates for immediate responses
                 if (data.commit_job_id) {
                     html += '<div class="commit-status" id="commitStatusDiv">';
                     html += '<h3>🔄 Commit Status (Live Updates):</h3>';
                     html += '<p><strong>Job ID:</strong> ' + data.commit_job_id + '</p>';
                     html += '<div id="liveStatus">';
                     
-                    if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
+                    if (data.immediate_response) {
+                        // Server returned immediately, start live polling
+                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 SUBMITTED</span></p>';
+                        html += '<p><strong>Progress:</strong> <span id="progressText">0%</span></p>';
+                        html += '<p id="statusMessage">⏳ Commit started successfully. Checking status...</p>';
+                        
+                        // Start live polling immediately
+                        setTimeout(function() {
+                            startLivePolling(data.commit_job_id);
+                        }, 1000);
+                    } else if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
+                        // Backend completed polling
                         var autoStatus = data.auto_commit_status;
                         
                         if (autoStatus.status === 'FIN') {
@@ -981,24 +958,33 @@ DASHBOARD_TEMPLATE = '''
                             html += '<p><strong>Status:</strong> <span style="color: orange;">⏳ ' + autoStatus.status + '</span></p>';
                             html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
                             html += '<p>⏳ Still processing...</p>';
+                            
+                            // Continue live polling for incomplete statuses
+                            setTimeout(function() {
+                                startLivePolling(data.commit_job_id);
+                            }, 2000);
                         }
                     } else {
-                        // Start live polling if auto-polling failed or incomplete
+                        // Fallback - start live polling
                         html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 CHECKING...</span></p>';
                         html += '<p><strong>Progress:</strong> <span id="progressText">0%</span></p>';
-                        html += '<p id="statusMessage">⏳ Starting status checks...</p>';
+                        html += '<p id="statusMessage">⏳ Checking commit status...</p>';
+                        
+                        setTimeout(function() {
+                            startLivePolling(data.commit_job_id);
+                        }, 2000);
                     }
                     
                     html += '</div>';
                     html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')" id="refreshBtn">Refresh Status</button>';
                     html += '</div>';
-                    
-                    // Start automatic live polling if not completed
-                    if (!data.auto_commit_status || data.auto_commit_status.status !== 'FIN') {
-                        setTimeout(function() {
-                            startLivePolling(data.commit_job_id);
-                        }, 2000);
-                    }
+                } else {
+                    // No commit job ID - show warning
+                    html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+                    html += '<h3>⚠️ Commit Status Unknown</h3>';
+                    html += '<p>URLs were updated successfully, but commit status is not available.</p>';
+                    html += '<p>The changes may take effect automatically or may require manual commit.</p>';
+                    html += '</div>';
                 }
                 
                 if (data.ticket_log_file) {
