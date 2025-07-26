@@ -1,6 +1,6 @@
 /**
  * Enhanced Dashboard JavaScript for Palo Alto Whitelist Tool
- * Supports multiple search terms and manual URL addition
+ * Fixed error handling and status checking
  */
 
 // Global variables
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 /**
- * Handle search form submission with multiple terms support
+ * Handle search form submission with better error handling
  */
 function handleSearchSubmit(e) {
     e.preventDefault();
@@ -62,7 +62,7 @@ function handleSearchSubmit(e) {
     console.log('[DEBUG] Starting enhanced multi-term search request...');
     
     searchBtn.disabled = true;
-    searchBtn.textContent = 'Searching... (~2 min)';
+    searchBtn.textContent = 'Searching... (~3-4 min)';
     
     activateStep(2);
     
@@ -72,15 +72,18 @@ function handleSearchSubmit(e) {
         : `🎯 Multi-term search for ${terms.length} terms (${terms.join(', ')}) with OR logic and action "${selectedActionType}"`;
     
     resultsDiv.innerHTML = '<div class="loading">' + searchMessage + '...<br>' +
-                          '<small>⏱️ Running 4 attempts with timeouts: 10s, 15s, 25s, 35s<br>' +
+                          '<small>⏱️ Running up to 4 attempts with extended timeouts<br>' +
                           'Searching last 3 months, up to 3,000 entries<br>' +
-                          '<strong>Estimated time: ~2 minutes - Please wait...</strong></small></div>';
+                          '<strong>Estimated time: ~3-4 minutes - Please wait...</strong></small></div>';
     
     console.log('[DEBUG] Making fetch request to /search_urls');
     
     fetch('/search_urls', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
         body: JSON.stringify({
             search_term: searchTerms,
             action_type: selectedActionType
@@ -88,6 +91,17 @@ function handleSearchSubmit(e) {
     })
     .then(function(response) {
         console.log('[DEBUG] Got response:', response.status, response.statusText);
+        
+        // Check if response is JSON
+        var contentType = response.headers.get('Content-Type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response (got: ' + (contentType || 'unknown') + ')');
+        }
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
         return response.json();
     })
     .then(function(data) {
@@ -95,24 +109,34 @@ function handleSearchSubmit(e) {
         
         if (data.success) {
             console.log('[DEBUG] Search successful, found URLs:', data.urls);
-            searchResults = data.urls;
-            displaySearchResults(data.urls, searchTerms, selectedActionType, data.debug_info);
+            searchResults = data.urls || [];
+            displaySearchResults(searchResults, searchTerms, selectedActionType, data.debug_info);
             showManualUrlInput(); // Show manual URL input after search
         } else {
             console.log('[DEBUG] Search failed:', data.error);
-            resultsDiv.innerHTML = '<div class="error">Error: ' + data.error + '</div>';
+            var errorMessage = data.error || 'Unknown error occurred';
+            resultsDiv.innerHTML = '<div class="error">Search Result: ' + errorMessage + '</div>';
             showManualUrlInput(); // Show manual URL input even on search failure
         }
     })
     .catch(function(error) {
         console.error('[DEBUG] Fetch error:', error);
-        resultsDiv.innerHTML = '<div class="error">Network error: ' + error.message + '</div>';
+        var errorMessage = 'Network error: ' + error.message;
+        
+        // Provide helpful error messages
+        if (error.message.includes('non-JSON response')) {
+            errorMessage = 'Server error: The server returned an unexpected response. Please check your firewall connection and try again.';
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = 'Connection error: Could not connect to the server. Please check your network connection.';
+        }
+        
+        resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
         showManualUrlInput(); // Show manual URL input on network error
     })
     .finally(function() {
         console.log('[DEBUG] Search request completed');
         searchBtn.disabled = false;
-        searchBtn.textContent = 'Start Enhanced Search (~2 minutes)';
+        searchBtn.textContent = 'Start Enhanced Search (~3-4 minutes)';
     });
 }
 
@@ -127,15 +151,15 @@ function displaySearchResults(urls, searchTerms, actionType, debugInfo) {
     
     if (urls.length === 0) {
         html = '<div style="text-align: center; padding: 20px; color: #666;">' +
-            '<h4>No blocked URLs found</h4>';
+            '<h4>✅ Search Completed - No URLs Found</h4>';
         
         if (terms.length === 1) {
-            html += '<p>No URLs containing "' + terms[0] + '" found with action: <strong>' + actionType + '</strong></p>';
+            html += '<p>No URLs containing "' + terms[0] + '" were found with action: <strong>' + actionType + '</strong></p>';
         } else {
-            html += '<p>No URLs containing any of the terms (' + terms.join(', ') + ') found with action: <strong>' + actionType + '</strong></p>';
+            html += '<p>No URLs containing any of the terms (' + terms.join(', ') + ') were found with action: <strong>' + actionType + '</strong></p>';
         }
         
-        html += '<p><small>Searched last 3 months with 4 timeout attempts and OR logic for multiple terms</small></p>' +
+        html += '<p><small>✅ Search completed successfully. You can still add URLs manually below.</small></p>' +
             '</div>';
     } else {
         html = '<h3>🎯 Found ' + urls.length + ' blocked URLs:</h3>';
@@ -169,6 +193,167 @@ function displaySearchResults(urls, searchTerms, actionType, debugInfo) {
         }
     }, 100);
 }
+
+/**
+ * Check commit status with better error handling
+ */
+function checkCommitStatus(jobId) {
+    console.log('[DEBUG] Checking commit status for job:', jobId);
+    
+    fetch('/commit_status', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({job_id: jobId})
+    })
+    .then(function(response) {
+        console.log('[DEBUG] Commit status response:', response.status);
+        
+        // Check if response is JSON
+        var contentType = response.headers.get('Content-Type');
+        if (!contentType || !contentType.includes('application/json')) {
+            throw new Error('Server returned non-JSON response for commit status');
+        }
+        
+        if (!response.ok) {
+            throw new Error('HTTP error! status: ' + response.status);
+        }
+        
+        return response.json();
+    })
+    .then(function(data) {
+        console.log('[DEBUG] Commit status data:', data);
+        
+        var statusDiv = document.querySelector('.commit-status');
+        if (data.success && statusDiv && data.status) {
+            var status = data.status;
+            var statusHTML = '<h3>🔄 Commit Status (Updated):</h3>';
+            statusHTML += '<p><strong>Job ID:</strong> ' + jobId + '</p>';
+            statusHTML += '<p><strong>Status:</strong> ' + status.status + '</p>';
+            statusHTML += '<p><strong>Progress:</strong> ' + status.progress + '%</p>';
+            
+            if (status.status === 'FIN') {
+                statusHTML += '<p style="color: green;">✅ Commit completed successfully!</p>';
+            } else if (status.status === 'FAIL' || status.status === 'ERROR') {
+                statusHTML += '<p style="color: red;">❌ Commit failed</p>';
+                if (status.error) {
+                    statusHTML += '<p style="color: red; font-size: 12px;">Error: ' + status.error + '</p>';
+                }
+            } else if (status.status !== 'FIN') {
+                statusHTML += '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Refresh Status</button>';
+            }
+            
+            statusDiv.innerHTML = statusHTML;
+        } else {
+            console.error('[DEBUG] Invalid commit status response:', data);
+            var statusDiv = document.querySelector('.commit-status');
+            if (statusDiv) {
+                statusDiv.innerHTML = '<p style="color: orange;">⚠️ Could not get current status. Job may still be processing.</p>';
+            }
+        }
+    })
+    .catch(function(error) {
+        console.error('[DEBUG] Commit status check failed:', error);
+        var statusDiv = document.querySelector('.commit-status');
+        if (statusDiv) {
+            var errorMsg = 'Status check failed: ' + error.message;
+            if (error.message.includes('non-JSON response')) {
+                errorMsg = 'Server error: Could not get commit status. The job may still be processing.';
+            }
+            statusDiv.innerHTML = '<p style="color: orange;">⚠️ ' + errorMsg + '</p>' +
+                                '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Try Again</button>';
+        }
+    });
+}
+
+/**
+ * Display submission results with better error handling
+ */
+function displayResults(data) {
+    var resultsDiv = document.getElementById('results');
+    
+    if (data.success) {
+        var html = '<div class="success">' + data.message + '</div>';
+        
+        // Handle timeout case
+        if (data.timeout_occurred) {
+            html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+            html += '<h3>⏳ Submission In Progress</h3>';
+            html += '<p>Your whitelist request is being processed. This may take a few minutes.</p>';
+            html += '<p><strong>What happens next:</strong></p>';
+            html += '<ul>';
+            html += '<li>URLs are being added to the category</li>';
+            html += '<li>Configuration is being committed to the firewall</li>';
+            html += '<li>Changes will be active once commit completes</li>';
+            html += '</ul>';
+            html += '</div>';
+            
+            if (data.ticket_log_file) {
+                html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+                html += '<h3>📋 Ticket Log Created:</h3>';
+                html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
+                html += '<p>✅ Individual ticket log created for audit trail</p>';
+                html += '</div>';
+            }
+            
+            resultsDiv.innerHTML = html;
+            return;
+        }
+        
+        // Show commit status if available
+        if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
+            var autoStatus = data.auto_commit_status;
+            html += '<div class="commit-status">';
+            html += '<h3>🔄 Commit Status (Auto-Polled):</h3>';
+            html += '<p><strong>Job ID:</strong> ' + (data.commit_job_id || 'Unknown') + '</p>';
+            
+            if (autoStatus.status === 'FIN') {
+                html += '<p><strong>Status:</strong> <span style="color: green;">✅ COMPLETED</span></p>';
+                html += '<p><strong>Progress:</strong> 100%</p>';
+                html += '<p style="color: green;">🎉 Configuration has been successfully committed to the firewall!</p>';
+            } else if (autoStatus.status === 'FAIL' || autoStatus.status === 'ERROR') {
+                html += '<p><strong>Status:</strong> <span style="color: red;">❌ FAILED</span></p>';
+                html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                html += '<p style="color: red;">⚠️ Commit failed. Please check firewall logs.</p>';
+                if (autoStatus.error) {
+                    html += '<p style="color: red; font-size: 12px;">Error: ' + autoStatus.error + '</p>';
+                }
+            } else {
+                html += '<p><strong>Status:</strong> <span style="color: orange;">⏳ ' + autoStatus.status + '</span></p>';
+                html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                if (data.commit_job_id) {
+                    html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')">Check Current Status</button>';
+                }
+            }
+            html += '</div>';
+        } else if (data.commit_job_id) {
+            // Show basic commit info if auto-polling failed
+            html += '<div class="commit-status">';
+            html += '<h3>🔄 Commit Status:</h3>';
+            html += '<p><strong>Job ID:</strong> ' + data.commit_job_id + '</p>';
+            html += '<p>⏳ Commit was submitted. Click below to check status:</p>';
+            html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')">Check Status</button>';
+            html += '</div>';
+        }
+        
+        if (data.ticket_log_file) {
+            html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+            html += '<h3>📋 Ticket Log Created:</h3>';
+            html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
+            html += '<p>✅ Individual ticket log created for audit trail</p>';
+            html += '</div>';
+        }
+        
+        resultsDiv.innerHTML = html;
+    } else {
+        resultsDiv.innerHTML = '<div class="error">Error: ' + (data.error || 'Unknown error occurred') + '</div>';
+    }
+}
+
+// Rest of the JavaScript functions remain the same...
+// (Including showManualUrlInput, validateManualUrls, addManualUrls, etc.)
 
 /**
  * Show manual URL input section
@@ -626,112 +811,6 @@ function submitWhitelist() {
         clearTimeout(submissionTimeout);
         submitBtn.disabled = false;
         submitBtn.textContent = 'Submit Whitelist Request';
-    });
-}
-
-/**
- * Display submission results
- */
-function displayResults(data) {
-    var resultsDiv = document.getElementById('results');
-    
-    if (data.success) {
-        var html = '<div class="success">' + data.message + '</div>';
-        
-        // Handle timeout case
-        if (data.timeout_occurred) {
-            html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-            html += '<h3>⏳ Submission In Progress</h3>';
-            html += '<p>Your whitelist request is being processed. This may take a few minutes.</p>';
-            html += '<p><strong>What happens next:</strong></p>';
-            html += '<ul>';
-            html += '<li>URLs are being added to the category</li>';
-            html += '<li>Configuration is being committed to the firewall</li>';
-            html += '<li>Changes will be active once commit completes</li>';
-            html += '</ul>';
-            html += '</div>';
-            
-            if (data.ticket_log_file) {
-                html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-                html += '<h3>📋 Ticket Log Created:</h3>';
-                html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
-                html += '<p>✅ Individual ticket log created for audit trail</p>';
-                html += '</div>';
-            }
-            
-            resultsDiv.innerHTML = html;
-            return;
-        }
-        
-        // Show commit status if available
-        if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
-            var autoStatus = data.auto_commit_status;
-            html += '<div class="commit-status">';
-            html += '<h3>🔄 Commit Status (Auto-Polled):</h3>';
-            html += '<p><strong>Job ID:</strong> ' + data.commit_job_id + '</p>';
-            
-            if (autoStatus.status === 'FIN') {
-                html += '<p><strong>Status:</strong> <span style="color: green;">✅ COMPLETED</span></p>';
-                html += '<p><strong>Progress:</strong> 100%</p>';
-                html += '<p style="color: green;">🎉 Configuration has been successfully committed to the firewall!</p>';
-            } else if (autoStatus.status === 'FAIL') {
-                html += '<p><strong>Status:</strong> <span style="color: red;">❌ FAILED</span></p>';
-                html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
-                html += '<p style="color: red;">⚠️ Commit failed. Please check firewall logs.</p>';
-            } else {
-                html += '<p><strong>Status:</strong> <span style="color: orange;">⏳ ' + autoStatus.status + '</span></p>';
-                html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
-                if (data.commit_job_id) {
-                    html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')">Check Current Status</button>';
-                }
-            }
-            html += '</div>';
-        }
-        
-        if (data.ticket_log_file) {
-            html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-            html += '<h3>📋 Ticket Log Created:</h3>';
-            html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
-            html += '<p>✅ Individual ticket log created for audit trail</p>';
-            html += '</div>';
-        }
-        
-        resultsDiv.innerHTML = html;
-    } else {
-        resultsDiv.innerHTML = '<div class="error">Error: ' + data.error + '</div>';
-    }
-}
-
-/**
- * Check commit status
- */
-function checkCommitStatus(jobId) {
-    fetch('/commit_status', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({job_id: jobId})
-    })
-    .then(function(response) {
-        return response.json();
-    })
-    .then(function(data) {
-        var statusDiv = document.querySelector('.commit-status');
-        if (data.success && statusDiv) {
-            var status = data.status;
-            var statusHTML = '<h3>Commit Status:</h3>';
-            statusHTML += '<p><strong>Job ID:</strong> ' + jobId + '</p>';
-            statusHTML += '<p><strong>Status:</strong> ' + status.status + '</p>';
-            statusHTML += '<p><strong>Progress:</strong> ' + status.progress + '%</p>';
-            
-            if (status.status !== 'FIN') {
-                statusHTML += '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Refresh Status</button>';
-            }
-            
-            statusDiv.innerHTML = statusHTML;
-        }
-    })
-    .catch(function(error) {
-        console.error('Commit status check failed:', error);
     });
 }
 
