@@ -93,16 +93,41 @@ class SearchService:
             print(f"[DEBUG] Search terms used: {parsed_terms}")
             print(f"[DEBUG] Found URLs: {final_urls}")
             
-            # Determine success - finding no URLs is not necessarily an error
-            is_success = True  # Always consider search successful if no exceptions occurred
+            # Determine success - distinguish between "no results" and "actual errors"
+            successful_attempts = sum(1 for attempt in attempts if attempt.success)
+            actual_errors = [attempt for attempt in attempts if attempt.error and "timeout" in attempt.error.lower()]
+            
+            is_success = True  # Default to success
             error_message = None
             
-            # Only mark as error if all attempts failed with actual errors
-            if successful_attempts == 0 and all(attempt.error for attempt in attempts):
+            # Only mark as error if we had actual technical failures
+            if successful_attempts == 0 and len(actual_errors) > 0:
+                # We had real timeout/connection errors
                 is_success = False
-                # Get the most common error
-                errors = [attempt.error for attempt in attempts if attempt.error]
-                error_message = errors[0] if errors else "All search attempts failed"
+                error_message = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
+            elif successful_attempts == 0 and all(attempt.error for attempt in attempts):
+                # All attempts failed with some other error
+                is_success = False
+                common_errors = [attempt.error for attempt in attempts if attempt.error]
+                if common_errors:
+                    first_error = common_errors[0]
+                    if "authentication" in first_error.lower():
+                        error_message = "Authentication failed. Please log in again."
+                    elif "connection" in first_error.lower():
+                        error_message = "Connection error. Please check your firewall connectivity."
+                    else:
+                        error_message = first_error
+                else:
+                    error_message = "All search attempts failed"
+            
+            # If we found no URLs but had successful queries, that's still success
+            if successful_attempts > 0:
+                is_success = True
+                error_message = None
+            
+            print(f"[DEBUG] Final determination: is_success={is_success}, successful_attempts={successful_attempts}, total_attempts={len(attempts)}")
+            if error_message:
+                print(f"[DEBUG] Error message: {error_message}")
             
             return SearchResult(
                 urls=final_urls,
@@ -229,11 +254,13 @@ class SearchService:
             if result['type'] == 'direct':
                 print(f"[DEBUG] {attempt_name}: DIRECT results - {len(result['entries'])} entries")
                 matches_found = self._process_log_entries(result['entries'], search_terms, blocked_urls, attempt_name)
+                # Mark as successful even if no matches found - the query worked
+                attempt.success = True
                 if matches_found > 0:
-                    attempt.success = True
                     print(f"[DEBUG] {attempt_name}: Direct query successful - {matches_found} matches")
                 else:
-                    attempt.error = "No matching URLs found in direct results"
+                    print(f"[DEBUG] {attempt_name}: Direct query successful - no matching URLs found")
+                    attempt.error = None  # No error, just no matches
             
             elif result['type'] == 'job':
                 job_id = result['job_id']
@@ -245,28 +272,29 @@ class SearchService:
                     logs = job_results.findall('.//entry')
                     print(f"[DEBUG] {attempt_name}: Job successful - {len(logs)} entries")
                     
-                    if len(logs) > 0:
-                        matches_found = self._process_log_entries(logs, search_terms, blocked_urls, f"{attempt_name} Job")
-                        if matches_found > 0:
-                            attempt.success = True
-                            print(f"[DEBUG] {attempt_name}: Job successful - {matches_found} matches")
-                        else:
-                            attempt.error = "No matching URLs found in job results"
+                    # Job completed successfully, regardless of matches found
+                    attempt.success = True
+                    matches_found = self._process_log_entries(logs, search_terms, blocked_urls, f"{attempt_name} Job")
+                    if matches_found > 0:
+                        print(f"[DEBUG] {attempt_name}: Job successful - {matches_found} matches")
                     else:
-                        attempt.error = "Job completed but returned no log entries"
+                        print(f"[DEBUG] {attempt_name}: Job successful - no matching URLs found")
+                        attempt.error = None  # No error, just no matches
                 else:
                     print(f"[DEBUG] {attempt_name}: Job failed or timed out after {extended_timeout}s")
                     attempt.error = "Job timeout or failure"
+                    # Don't mark as success if job actually failed
             
             elif result['type'] == 'empty':
-                print(f"[DEBUG] {attempt_name}: Empty result")
-                attempt.error = "Empty result from firewall"
+                print(f"[DEBUG] {attempt_name}: Empty result - no log entries returned")
+                attempt.success = True  # Empty result is still a successful query
+                attempt.error = None  # No error, just no data
             else:
                 attempt.error = f"Unknown result type: {result.get('type', 'unknown')}"
         
         except Exception as e:
             print(f"[DEBUG] {attempt_name}: Exception - {e}")
-            # Try to provide more specific error messages
+            # Only mark as actual error for real exceptions
             error_str = str(e).lower()
             if "timeout" in error_str:
                 attempt.error = f"Request timeout after {timeout}s"

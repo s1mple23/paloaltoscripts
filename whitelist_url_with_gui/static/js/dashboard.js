@@ -115,8 +115,18 @@ function handleSearchSubmit(e) {
         } else {
             console.log('[DEBUG] Search failed:', data.error);
             var errorMessage = data.error || 'Unknown error occurred';
-            resultsDiv.innerHTML = '<div class="error">Search Result: ' + errorMessage + '</div>';
-            showManualUrlInput(); // Show manual URL input even on search failure
+            
+            // Don't treat "no URLs found" as an error in the UI
+            if (errorMessage.includes('no URLs were found') || errorMessage.includes('no matching URLs')) {
+                // This is actually a successful search with no results
+                searchResults = [];
+                displaySearchResults([], searchTerms, selectedActionType, data.debug_info);
+                showManualUrlInput();
+            } else {
+                // This is a real error
+                resultsDiv.innerHTML = '<div class="error">Search Error: ' + errorMessage + '</div>';
+                showManualUrlInput(); // Still show manual URL input
+            }
         }
     })
     .catch(function(error) {

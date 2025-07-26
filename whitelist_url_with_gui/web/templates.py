@@ -1,6 +1,6 @@
 """
 Enhanced HTML Templates for the web interface
-Now supports multiple search terms and manual URL input
+Complete file with embedded JavaScript and proper function exports
 """
 from config import config
 
@@ -124,7 +124,7 @@ DASHBOARD_TEMPLATE = '''
         <h2><span class="step-number">1</span>Enhanced URL Search</h2>
         
         <div class="timing-info">
-            ⏱️ <strong>Search Duration:</strong> Each search takes approximately 2 minutes (4 attempts with timeouts: {{ config.SEARCH_TIMEOUT_ATTEMPTS|join(', ') }}s + processing time)
+            ⏱️ <strong>Search Duration:</strong> Each search takes approximately 3-4 minutes (4 attempts with extended timeouts)
         </div>
         
         <div class="multi-search-info">
@@ -133,16 +133,10 @@ DASHBOARD_TEMPLATE = '''
             • <strong>Multiple Terms:</strong> Enter comma-separated terms (e.g., "youtube, facebook, twitch")<br>
             • <strong>OR Logic:</strong> System automatically uses OR logic for multiple terms<br>
             • <strong>Manual URLs:</strong> Add additional URLs manually after search<br>
-            • <strong>Time Range:</strong> Searches last {{ config.LOOKBACK_MONTHS }} months with up to {{ config.DEFAULT_MAX_RESULTS }} entries
+            • <strong>Time Range:</strong> Searches last 3 months with up to 3,000 entries
         </div>
         
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-        
-        <form id="searchForm">
+        <form id="searchForm" onsubmit="return handleSearchSubmit(event);">
             <div class="form-group">
                 <label for="search_term">Search Terms (single or comma-separated):</label>
                 <input type="text" id="search_term" name="search_term" 
@@ -164,7 +158,7 @@ DASHBOARD_TEMPLATE = '''
                 </label>
             </div>
             
-            <button type="submit" class="btn">Start Enhanced Search (~2 minutes)</button>
+            <button type="submit" class="btn" id="searchButton">Start Enhanced Search (~3-4 minutes)</button>
             <button type="button" class="btn btn-secondary" onclick="debugLogs()">Debug Connection</button>
         </form>
         
@@ -179,18 +173,16 @@ DASHBOARD_TEMPLATE = '''
             <!-- Search results will appear here -->
         </div>
         
-        <!-- Manual URL Input Section (will be dynamically added) -->
-        
         <div class="whitelist-options" id="whitelistOptions" style="display: none;">
             <h3>Whitelisting Options:</h3>
             <div class="form-group">
                 <label>
-                    <input type="checkbox" id="exactMatch" checked> Add exact matches (e.g., domain.com/)
+                    <input type="checkbox" id="exactMatch" checked onchange="updateUrlPreview()"> Add exact matches (e.g., domain.com/)
                 </label>
             </div>
             <div class="form-group">
                 <label>
-                    <input type="checkbox" id="wildcardMatch" checked> Add wildcard matches (e.g., *.domain.com/)
+                    <input type="checkbox" id="wildcardMatch" checked onchange="updateUrlPreview()"> Add wildcard matches (e.g., *.domain.com/)
                 </label>
             </div>
         </div>
@@ -238,7 +230,989 @@ DASHBOARD_TEMPLATE = '''
         <button class="btn" onclick="startOver()">Start New Request</button>
     </div>
 
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <script>
+        // Embedded JavaScript to avoid loading issues
+        console.log('[DEBUG] Dashboard script starting...');
+        
+        // Global variables
+        var selectedUrls = [];
+        var searchResults = [];
+        var manualUrls = [];
+        var categories = {};
+        var selectedActionType = 'block-url';
+
+        // Prevent form submission from reloading page
+        function handleSearchSubmit(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            
+            console.log('[DEBUG] Search form submitted - preventing default');
+            
+            var searchTerms = document.getElementById('search_term').value.trim();
+            selectedActionType = document.querySelector('input[name="action_type"]:checked').value;
+            
+            console.log('[DEBUG] Search terms:', searchTerms);
+            console.log('[DEBUG] Action type:', selectedActionType);
+            
+            if (!searchTerms) {
+                alert('Please enter at least one search term');
+                return false;
+            }
+            
+            // Validate search terms
+            var terms = searchTerms.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
+            if (terms.length === 0) {
+                alert('Please enter valid search terms');
+                return false;
+            }
+            
+            var resultsDiv = document.getElementById('urlSelection');
+            var searchBtn = document.getElementById('searchButton');
+            
+            console.log('[DEBUG] Starting enhanced multi-term search request...');
+            
+            searchBtn.disabled = true;
+            searchBtn.textContent = 'Searching... (~3-4 min)';
+            
+            activateStep(2);
+            
+            // Show different message based on number of terms
+            var searchMessage = terms.length === 1 
+                ? '🎯 Targeted search for "' + terms[0] + '" with action "' + selectedActionType + '"'
+                : '🎯 Multi-term search for ' + terms.length + ' terms (' + terms.join(', ') + ') with OR logic and action "' + selectedActionType + '"';
+            
+            resultsDiv.innerHTML = '<div class="loading">' + searchMessage + '...<br>' +
+                                  '<small>⏱️ Running up to 4 attempts with extended timeouts<br>' +
+                                  'Searching last 3 months, up to 3,000 entries<br>' +
+                                  '<strong>Estimated time: ~3-4 minutes - Please wait...</strong></small></div>';
+            
+            console.log('[DEBUG] Making fetch request to /search_urls');
+            
+            fetch('/search_urls', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    search_term: searchTerms,
+                    action_type: selectedActionType
+                })
+            })
+            .then(function(response) {
+                console.log('[DEBUG] Got response:', response.status, response.statusText);
+                
+                // Check if response is JSON
+                var contentType = response.headers.get('Content-Type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response (got: ' + (contentType || 'unknown') + ')');
+                }
+                
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                
+                return response.json();
+            })
+            .then(function(data) {
+                console.log('[DEBUG] Response data:', data);
+                
+                if (data.success) {
+                    console.log('[DEBUG] Search successful, found URLs:', data.urls);
+                    searchResults = data.urls || [];
+                    displaySearchResults(searchResults, searchTerms, selectedActionType, data.debug_info);
+                    showManualUrlInput();
+                } else {
+                    console.log('[DEBUG] Search failed:', data.error);
+                    var errorMessage = data.error || 'Unknown error occurred';
+                    
+                    // Don't treat "no URLs found" as an error in the UI
+                    if (errorMessage.includes('no URLs were found') || errorMessage.includes('no matching URLs')) {
+                        searchResults = [];
+                        displaySearchResults([], searchTerms, selectedActionType, data.debug_info);
+                        showManualUrlInput();
+                    } else {
+                        resultsDiv.innerHTML = '<div class="error">Search Error: ' + errorMessage + '</div>';
+                        showManualUrlInput();
+                    }
+                }
+            })
+            .catch(function(error) {
+                console.error('[DEBUG] Fetch error:', error);
+                var errorMessage = 'Network error: ' + error.message;
+                
+                if (error.message.includes('non-JSON response')) {
+                    errorMessage = 'Server error: The server returned an unexpected response. Please check your firewall connection and try again.';
+                } else if (error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Connection error: Could not connect to the server. Please check your network connection.';
+                }
+                
+                resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
+                showManualUrlInput();
+            })
+            .finally(function() {
+                console.log('[DEBUG] Search request completed');
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Start Enhanced Search (~3-4 minutes)';
+            });
+            
+            return false;
+        }
+        
+        function displaySearchResults(urls, searchTerms, actionType, debugInfo) {
+            var resultsDiv = document.getElementById('urlSelection');
+            var terms = searchTerms.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
+            
+            var html = '';
+            
+            if (urls.length === 0) {
+                html = '<div style="text-align: center; padding: 20px; color: #666;">' +
+                    '<h4>✅ Search Completed - No URLs Found</h4>';
+                
+                if (terms.length === 1) {
+                    html += '<p>No URLs containing "' + terms[0] + '" were found with action: <strong>' + actionType + '</strong></p>';
+                } else {
+                    html += '<p>No URLs containing any of the terms (' + terms.join(', ') + ') were found with action: <strong>' + actionType + '</strong></p>';
+                }
+                
+                html += '<p><small>✅ Search completed successfully. You can add URLs manually below.</small></p>' +
+                    '</div>';
+            } else {
+                html = '<h3>🎯 Found ' + urls.length + ' blocked URLs:</h3>';
+                
+                if (terms.length === 1) {
+                    html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
+                           '✅ <strong>Single-term Results:</strong> Searched for "' + terms[0] + '" with action "' + actionType + '"<br>';
+                } else {
+                    html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
+                           '✅ <strong>Multi-term OR Results:</strong> Searched for ' + terms.length + ' terms (' + terms.join(', ') + ') with action "' + actionType + '"<br>';
+                }
+                
+                html += '📅 <strong>Time Range:</strong> Last 3 months, up to 3,000 entries<br>' +
+                       'Click the checkboxes below to select URLs for whitelisting:</div>';
+                
+                for (var i = 0; i < urls.length; i++) {
+                    var url = urls[i];
+                    html += '<div class="url-item" style="margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white;">';
+                    html += '<input type="checkbox" id="url_' + i + '" value="' + url + '" style="margin-right: 10px; transform: scale(1.2);" onchange="updateSelectedUrls()">';
+                    html += '<label for="url_' + i + '" style="cursor: pointer; user-select: none;">' + url + '</label>';
+                    html += '</div>';
+                }
+            }
+            
+            resultsDiv.innerHTML = html;
+        }
+        
+        function showManualUrlInput() {
+            console.log('[DEBUG] Showing manual URL input section');
+            var urlSelection = document.getElementById('urlSelection');
+            var existing = document.getElementById('manualUrlSection');
+            if (!existing) {
+                var manualHtml = '<div id="manualUrlSection" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">' +
+                                '<h4>📝 Add Manual URLs</h4>' +
+                                '<p>You can also add URLs manually (one per line or comma-separated):</p>' +
+                                '<textarea id="manualUrls" placeholder="Example:&#10;youtube.com&#10;facebook.com&#10;*.google.com&#10;or: youtube.com, facebook.com, *.google.com" ' +
+                                'style="width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"></textarea>' +
+                                '<div id="manualUrlValidation" style="margin-top: 10px;"></div>' +
+                                '<button type="button" class="btn" onclick="addManualUrls()" style="margin-top: 10px;">Add Manual URLs</button>' +
+                                '</div>';
+                urlSelection.insertAdjacentHTML('afterend', manualHtml);
+                
+                // Add event listener for validation
+                var manualUrlInput = document.getElementById('manualUrls');
+                if (manualUrlInput) {
+                    manualUrlInput.addEventListener('input', validateManualUrls);
+                }
+            }
+        }
+        
+        function validateManualUrls() {
+            var input = document.getElementById('manualUrls').value.trim();
+            var validationDiv = document.getElementById('manualUrlValidation');
+            
+            if (!input) {
+                validationDiv.innerHTML = '';
+                return;
+            }
+            
+            fetch('/validate_manual_urls', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({manual_urls: input})
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success) {
+                    var html = '';
+                    if (data.valid_urls && data.valid_urls.length > 0) {
+                        html += '<div style="color: green;">✅ Valid URLs (' + data.valid_urls.length + '): ' + data.valid_urls.join(', ') + '</div>';
+                    }
+                    if (data.invalid_urls && data.invalid_urls.length > 0) {
+                        html += '<div style="color: red;">❌ Invalid URLs (' + data.invalid_urls.length + '): ' + data.invalid_urls.join(', ') + '</div>';
+                    }
+                    validationDiv.innerHTML = html;
+                }
+            })
+            .catch(function(error) {
+                validationDiv.innerHTML = '<div style="color: orange;">⚠️ Validation temporarily unavailable</div>';
+            });
+        }
+        
+        function addManualUrls() {
+            var input = document.getElementById('manualUrls').value.trim();
+            if (!input) {
+                alert('Please enter some URLs');
+                return;
+            }
+            
+            fetch('/validate_manual_urls', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({manual_urls: input})
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success && data.valid_urls && data.valid_urls.length > 0) {
+                    // Add valid URLs to manual list
+                    data.valid_urls.forEach(function(url) {
+                        if (manualUrls.indexOf(url) === -1) {
+                            manualUrls.push(url);
+                        }
+                    });
+                    
+                    // Clear input
+                    document.getElementById('manualUrls').value = '';
+                    document.getElementById('manualUrlValidation').innerHTML = '';
+                    
+                    // Update display
+                    displayManualUrls();
+                    updateSelectedUrls();
+                    
+                    alert('Added ' + data.valid_urls.length + ' valid URLs to selection');
+                    
+                    if (data.invalid_urls && data.invalid_urls.length > 0) {
+                        alert('Note: ' + data.invalid_urls.length + ' invalid URLs were ignored: ' + data.invalid_urls.join(', '));
+                    }
+                } else {
+                    alert('No valid URLs found. Please check your input.');
+                }
+            })
+            .catch(function(error) {
+                alert('Error validating URLs: ' + error.message);
+            });
+        }
+        
+        function displayManualUrls() {
+            var manualSection = document.getElementById('manualUrlSection');
+            var existingDisplay = document.getElementById('manualUrlDisplay');
+            
+            if (existingDisplay) {
+                existingDisplay.remove();
+            }
+            
+            if (manualUrls.length > 0) {
+                var html = '<div id="manualUrlDisplay" style="margin-top: 15px; padding: 10px; background: #e8f5e8; border-radius: 4px;">' +
+                          '<h5>📋 Manual URLs (' + manualUrls.length + '):</h5>';
+                
+                for (var i = 0; i < manualUrls.length; i++) {
+                    html += '<div style="margin: 5px 0; padding: 5px; background: white; border-radius: 3px; display: flex; align-items: center;">' +
+                           '<input type="checkbox" id="manual_' + i + '" checked style="margin-right: 10px;" onchange="updateSelectedUrls()">' +
+                           '<span style="flex: 1;">' + manualUrls[i] + '</span>' +
+                           '<button onclick="removeManualUrl(' + i + ')" style="padding: 2px 8px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Remove</button>' +
+                           '</div>';
+                }
+                
+                html += '</div>';
+                manualSection.insertAdjacentHTML('afterend', html);
+            }
+        }
+        
+        function removeManualUrl(index) {
+            manualUrls.splice(index, 1);
+            displayManualUrls();
+            updateSelectedUrls();
+        }
+        
+        function updateSelectedUrls() {
+            console.log('[DEBUG] Updating selected URLs');
+            selectedUrls = [];
+            
+            // Add selected search results
+            for (var i = 0; i < searchResults.length; i++) {
+                var checkbox = document.getElementById('url_' + i);
+                if (checkbox && checkbox.checked) {
+                    selectedUrls.push(searchResults[i]);
+                }
+            }
+            
+            // Add selected manual URLs
+            for (var i = 0; i < manualUrls.length; i++) {
+                var checkbox = document.getElementById('manual_' + i);
+                if (checkbox && checkbox.checked) {
+                    selectedUrls.push(manualUrls[i]);
+                }
+            }
+            
+            var optionsDiv = document.getElementById('whitelistOptions');
+            var previewDiv = document.getElementById('selectedUrlsPreview');
+            var proceedBtn = document.getElementById('proceedBtn');
+            
+            if (selectedUrls.length > 0) {
+                optionsDiv.style.display = 'block';
+                updateUrlPreview();
+                previewDiv.style.display = 'block';
+                proceedBtn.style.display = 'inline-block';
+            } else {
+                optionsDiv.style.display = 'none';
+                previewDiv.style.display = 'none';
+                proceedBtn.style.display = 'none';
+            }
+        }
+        
+        function updateUrlPreview() {
+            console.log('[DEBUG] Updating URL preview');
+            var exactMatch = document.getElementById('exactMatch').checked;
+            var wildcardMatch = document.getElementById('wildcardMatch').checked;
+            var previewList = document.getElementById('urlPreviewList');
+            
+            var html = '<ul>';
+            for (var i = 0; i < selectedUrls.length; i++) {
+                var url = selectedUrls[i];
+                
+                // Handle different URL formats
+                if (url.startsWith('*.')) {
+                    // Already a wildcard
+                    if (wildcardMatch) {
+                        html += '<li>' + url + '</li>';
+                    }
+                    if (exactMatch) {
+                        // Remove wildcard for exact match
+                        var exactUrl = url.substring(2);
+                        if (!exactUrl.endsWith('/')) {
+                            exactUrl += '/';
+                        }
+                        html += '<li>' + exactUrl + '</li>';
+                    }
+                } else {
+                    // Regular domain
+                    var domain = url.endsWith('/') ? url : url + '/';
+                    if (exactMatch) {
+                        html += '<li>' + domain + '</li>';
+                    }
+                    if (wildcardMatch) {
+                        html += '<li>*.' + domain + '</li>';
+                    }
+                }
+            }
+            html += '</ul>';
+            
+            previewList.innerHTML = html;
+        }
+        
+        function activateStep(stepNumber) {
+            console.log('[DEBUG] Activating step:', stepNumber);
+            for (var i = 1; i <= 5; i++) {
+                var step = document.getElementById('step' + i);
+                if (step) {
+                    step.classList.remove('active');
+                }
+            }
+            
+            var targetStep = document.getElementById('step' + stepNumber);
+            if (targetStep) {
+                targetStep.classList.add('active');
+            }
+        }
+        
+        function debugLogs() {
+            console.log('[DEBUG] Debug button clicked');
+            
+            var resultsDiv = document.getElementById('debugResults');
+            resultsDiv.style.display = 'block';
+            resultsDiv.innerHTML = '<div class="loading">🔍 Testing firewall connection...</div>';
+            
+            fetch('/debug_logs')
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success) {
+                    var html = '<div><h3>🔧 Debug Information</h3>';
+                    
+                    html += '<h4>API Connectivity:</h4>';
+                    if (data.connectivity.success) {
+                        html += '<div style="color: green;">✅ ' + data.connectivity.message + '</div>';
+                    } else {
+                        html += '<div style="color: red;">❌ ' + data.connectivity.error + '</div>';
+                    }
+                    
+                    html += '<h4>Available Log Types:</h4>';
+                    html += '<table style="width: 100%; border-collapse: collapse;">';
+                    html += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Log Type</th><th style="border: 1px solid #ddd; padding: 8px;">Status</th></tr>';
+                    
+                    Object.keys(data.log_types).forEach(function(logType) {
+                        var status = data.log_types[logType];
+                        var statusText = '';
+                        var statusColor = 'black';
+                        
+                        if (typeof status === 'number') {
+                            statusColor = status > 0 ? 'green' : 'orange';
+                            statusText = status > 0 ? '✅ ' + status + ' entries' : '⚠️ 0 entries';
+                        } else if (typeof status === 'string') {
+                            if (status.includes('Error') || status.includes('Exception')) {
+                                statusColor = 'red';
+                                statusText = '❌ ' + status;
+                            } else if (status.includes('Found')) {
+                                statusColor = 'green';
+                                statusText = '✅ ' + status;
+                            } else {
+                                statusColor = 'orange';
+                                statusText = '⚠️ ' + status;
+                            }
+                        } else {
+                            statusText = String(status);
+                        }
+                        
+                        html += '<tr><td style="border: 1px solid #ddd; padding: 8px;">' + logType + '</td>';
+                        html += '<td style="border: 1px solid #ddd; padding: 8px; color: ' + statusColor + ';">' + statusText + '</td></tr>';
+                    });
+                    html += '</table>';
+                    html += '</div>';
+                    
+                    resultsDiv.innerHTML = html;
+                } else {
+                    resultsDiv.innerHTML = '<div class="error">Debug failed: ' + data.error + '</div>';
+                }
+            })
+            .catch(function(error) {
+                resultsDiv.innerHTML = '<div class="error">Debug request failed: ' + error.message + '</div>';
+            });
+        }
+        
+        function proceedToCategories() {
+            if (selectedUrls.length === 0) {
+                alert('Please select at least one URL');
+                return;
+            }
+            activateStep(3);
+            loadCategories();
+        }
+        
+        function loadCategories() {
+            var categorySelect = document.getElementById('urlCategory');
+            categorySelect.innerHTML = '<option value="">Loading categories...</option>';
+            
+            fetch('/get_categories')
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success) {
+                    categories = data.categories;
+                    categorySelect.innerHTML = '<option value="">Select a category...</option>';
+                    
+                    Object.keys(categories).forEach(function(displayName) {
+                        var option = document.createElement('option');
+                        option.value = displayName;
+                        option.textContent = displayName;
+                        categorySelect.appendChild(option);
+                    });
+                    
+                    categorySelect.addEventListener('change', function() {
+                        var proceedBtn = document.getElementById('categoryProceedBtn');
+                        proceedBtn.style.display = this.value ? 'inline-block' : 'none';
+                    });
+                } else {
+                    categorySelect.innerHTML = '<option value="">Error: ' + data.error + '</option>';
+                }
+            })
+            .catch(function(error) {
+                categorySelect.innerHTML = '<option value="">Error: ' + error.message + '</option>';
+            });
+        }
+        
+        function proceedToTicket() {
+            var categorySelect = document.getElementById('urlCategory');
+            if (!categorySelect.value) {
+                alert('Please select a URL category');
+                return;
+            }
+            activateStep(4);
+            updateFinalSummary();
+        }
+        
+        function updateFinalSummary() {
+            var categorySelect = document.getElementById('urlCategory');
+            var exactMatch = document.getElementById('exactMatch').checked;
+            var wildcardMatch = document.getElementById('wildcardMatch').checked;
+            
+            var urlsToAdd = [];
+            for (var i = 0; i < selectedUrls.length; i++) {
+                var url = selectedUrls[i];
+                
+                if (url.startsWith('*.')) {
+                    // Already a wildcard
+                    if (wildcardMatch) {
+                        urlsToAdd.push(url);
+                    }
+                    if (exactMatch) {
+                        var exactUrl = url.substring(2);
+                        if (!exactUrl.endsWith('/')) {
+                            exactUrl += '/';
+                        }
+                        urlsToAdd.push(exactUrl);
+                    }
+                } else {
+                    // Regular domain
+                    var domain = url.endsWith('/') ? url : url + '/';
+                    if (exactMatch) urlsToAdd.push(domain);
+                    if (wildcardMatch) urlsToAdd.push('*.' + domain);
+                }
+            }
+            
+            var summaryDiv = document.getElementById('finalSummary');
+            var urlsList = '';
+            for (var i = 0; i < urlsToAdd.length; i++) {
+                urlsList += '<li>' + urlsToAdd[i] + '</li>';
+            }
+            
+            var searchInfo = searchResults.length > 0 ? ' (' + searchResults.length + ' from search' : '';
+            var manualInfo = manualUrls.length > 0 ? ', ' + manualUrls.length + ' manual' : '';
+            var sourceInfo = searchInfo + manualInfo + (searchInfo ? ')' : '');
+            
+            summaryDiv.innerHTML = '<div><h3>Summary:</h3>' +
+                                  '<p><strong>Search Action:</strong> ' + selectedActionType + '</p>' +
+                                  '<p><strong>Category:</strong> ' + categorySelect.value + '</p>' +
+                                  '<p><strong>Total URLs selected:</strong> ' + selectedUrls.length + sourceInfo + '</p>' +
+                                  '<p><strong>URLs to add:</strong></p><ul>' + urlsList + '</ul></div>';
+        }
+        
+        function submitWhitelist() {
+            var ticketId = document.getElementById('ticketId').value.trim();
+            if (!ticketId) {
+                alert('Please enter a Change/Ticket ID');
+                return;
+            }
+            
+            var categorySelect = document.getElementById('urlCategory');
+            var exactMatch = document.getElementById('exactMatch').checked;
+            var wildcardMatch = document.getElementById('wildcardMatch').checked;
+            
+            if (!exactMatch && !wildcardMatch) {
+                alert('Please select at least one whitelisting option');
+                return;
+            }
+            
+            if (!categorySelect.value) {
+                alert('Please select a URL category');
+                return;
+            }
+            
+            var urlsToAdd = [];
+            for (var i = 0; i < selectedUrls.length; i++) {
+                var url = selectedUrls[i];
+                
+                if (url.startsWith('*.')) {
+                    // Already a wildcard
+                    if (wildcardMatch) {
+                        urlsToAdd.push(url);
+                    }
+                    if (exactMatch) {
+                        var exactUrl = url.substring(2);
+                        if (!exactUrl.endsWith('/')) {
+                            exactUrl += '/';
+                        }
+                        urlsToAdd.push(exactUrl);
+                    }
+                } else {
+                    // Regular domain
+                    var domain = url.endsWith('/') ? url : url + '/';
+                    if (exactMatch) urlsToAdd.push(domain);
+                    if (wildcardMatch) urlsToAdd.push('*.' + domain);
+                }
+            }
+            
+            if (urlsToAdd.length === 0) {
+                alert('No URLs to add. Please select some URLs first.');
+                return;
+            }
+            
+            var submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Submitting...';
+            
+            var payload = {
+                category: categorySelect.value,
+                urls: urlsToAdd,
+                ticket_id: ticketId,
+                action_type: selectedActionType
+            };
+            
+            console.log('[DEBUG] Submitting whitelist request:', payload);
+            
+            // Set timeout for submission
+            var submissionTimeout = setTimeout(function() {
+                console.log('[DEBUG] Submission taking longer than expected');
+                activateStep(5);
+                displayResults({
+                    success: true,
+                    message: 'Whitelist submission in progress...',
+                    timeout_occurred: true,
+                    commit_job_id: 'pending',
+                    auto_commit_status: {
+                        status: 'PROCESSING',
+                        progress: 'unknown',
+                        auto_polled: false
+                    }
+                });
+            }, 45000);
+            
+            fetch('/submit_whitelist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(function(response) {
+                clearTimeout(submissionTimeout);
+                console.log('[DEBUG] Submit response status:', response.status);
+                
+                var contentType = response.headers.get('Content-Type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response. Expected JSON but got: ' + (contentType || 'unknown'));
+                }
+                
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                
+                return response.json();
+            })
+            .then(function(data) {
+                clearTimeout(submissionTimeout);
+                console.log('[DEBUG] Submit response data:', data);
+                activateStep(5);
+                displayResults(data);
+            })
+            .catch(function(error) {
+                clearTimeout(submissionTimeout);
+                console.error('[DEBUG] Submit error:', error);
+                
+                var errorMessage = 'Submission failed: ' + error.message;
+                
+                if (error.message.includes('non-JSON response')) {
+                    errorMessage = 'Server error: The server returned an unexpected response. This might be a validation error or server issue. Please check your inputs and try again.';
+                } else if (error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Network error: Could not connect to the server. Please check your connection and try again.';
+                } else if (error.message.includes('string did not match the expected pattern')) {
+                    errorMessage = 'Validation error: One of the input values (ticket ID, URLs, or category) contains invalid characters. Please check your inputs and try again.';
+                }
+                
+                activateStep(5);
+                var resultsDiv = document.getElementById('results');
+                resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
+            })
+            .finally(function() {
+                clearTimeout(submissionTimeout);
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Enhanced Whitelist Request';
+            });
+        }
+        
+        function displayResults(data) {
+            var resultsDiv = document.getElementById('results');
+            
+            if (data.success) {
+                var html = '<div class="success">' + data.message + '</div>';
+                
+                // Handle timeout case
+                if (data.timeout_occurred) {
+                    html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+                    html += '<h3>⏳ Submission In Progress</h3>';
+                    html += '<p>Your whitelist request is being processed. This may take a few minutes.</p>';
+                    html += '<p><strong>What happens next:</strong></p>';
+                    html += '<ul>';
+                    html += '<li>URLs are being added to the category</li>';
+                    html += '<li>Configuration is being committed to the firewall</li>';
+                    html += '<li>Changes will be active once commit completes</li>';
+                    html += '</ul>';
+                    html += '</div>';
+                    
+                    if (data.ticket_log_file) {
+                        html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+                        html += '<h3>📋 Ticket Log Created:</h3>';
+                        html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
+                        html += '<p>✅ Individual ticket log created for audit trail</p>';
+                        html += '</div>';
+                    }
+                    
+                    resultsDiv.innerHTML = html;
+                    return;
+                }
+                
+                // Show commit status with live updates
+                if (data.commit_job_id) {
+                    html += '<div class="commit-status" id="commitStatusDiv">';
+                    html += '<h3>🔄 Commit Status (Live Updates):</h3>';
+                    html += '<p><strong>Job ID:</strong> ' + data.commit_job_id + '</p>';
+                    html += '<div id="liveStatus">';
+                    
+                    if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
+                        var autoStatus = data.auto_commit_status;
+                        
+                        if (autoStatus.status === 'FIN') {
+                            html += '<p><strong>Status:</strong> <span style="color: green;">✅ COMPLETED</span></p>';
+                            html += '<p><strong>Progress:</strong> 100%</p>';
+                            html += '<p style="color: green;">🎉 Configuration has been successfully committed to the firewall!</p>';
+                        } else if (autoStatus.status === 'FAIL' || autoStatus.status === 'ERROR') {
+                            html += '<p><strong>Status:</strong> <span style="color: red;">❌ FAILED</span></p>';
+                            html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                            html += '<p style="color: red;">⚠️ Commit failed. Please check firewall logs.</p>';
+                            if (autoStatus.error) {
+                                html += '<p style="color: red; font-size: 12px;">Error: ' + autoStatus.error + '</p>';
+                            }
+                        } else {
+                            html += '<p><strong>Status:</strong> <span style="color: orange;">⏳ ' + autoStatus.status + '</span></p>';
+                            html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                            html += '<p>⏳ Still processing...</p>';
+                        }
+                    } else {
+                        // Start live polling if auto-polling failed or incomplete
+                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 CHECKING...</span></p>';
+                        html += '<p><strong>Progress:</strong> <span id="progressText">0%</span></p>';
+                        html += '<p id="statusMessage">⏳ Starting status checks...</p>';
+                    }
+                    
+                    html += '</div>';
+                    html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')" id="refreshBtn">Refresh Status</button>';
+                    html += '</div>';
+                    
+                    // Start automatic live polling if not completed
+                    if (!data.auto_commit_status || data.auto_commit_status.status !== 'FIN') {
+                        setTimeout(function() {
+                            startLivePolling(data.commit_job_id);
+                        }, 2000);
+                    }
+                }
+                
+                if (data.ticket_log_file) {
+                    html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
+                    html += '<h3>📋 Ticket Log Created:</h3>';
+                    html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
+                    html += '<p>✅ Individual ticket log created for audit trail</p>';
+                    html += '</div>';
+                }
+                
+                resultsDiv.innerHTML = html;
+            } else {
+                resultsDiv.innerHTML = '<div class="error">Error: ' + (data.error || 'Unknown error occurred') + '</div>';
+            }
+        }
+        
+        var livePollingInterval = null;
+        var livePollingAttempts = 0;
+        var maxLivePollingAttempts = 30; // 5 minutes with 10-second intervals
+        
+        function startLivePolling(jobId) {
+            console.log('[DEBUG] Starting live polling for job:', jobId);
+            livePollingAttempts = 0;
+            
+            // Clear any existing interval
+            if (livePollingInterval) {
+                clearInterval(livePollingInterval);
+            }
+            
+            // Start immediate check
+            checkCommitStatusLive(jobId);
+            
+            // Set up interval for continuous checking
+            livePollingInterval = setInterval(function() {
+                livePollingAttempts++;
+                
+                if (livePollingAttempts >= maxLivePollingAttempts) {
+                    console.log('[DEBUG] Live polling timeout after', maxLivePollingAttempts, 'attempts');
+                    clearInterval(livePollingInterval);
+                    updateLiveStatus('TIMEOUT', 'unknown', 'Live polling timed out. Please refresh manually.');
+                    return;
+                }
+                
+                checkCommitStatusLive(jobId);
+            }, 10000); // Check every 10 seconds
+        }
+        
+        function checkCommitStatusLive(jobId) {
+            console.log('[DEBUG] Live polling attempt', livePollingAttempts + 1, 'for job:', jobId);
+            
+            fetch('/commit_status', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({job_id: jobId})
+            })
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success && data.status) {
+                    var status = data.status;
+                    console.log('[DEBUG] Live status update:', status.status, status.progress + '%');
+                    
+                    updateLiveStatus(status.status, status.progress, null, status.error);
+                    
+                    // Stop polling if completed or failed
+                    if (status.status === 'FIN' || status.status === 'FAIL' || status.status === 'ERROR') {
+                        console.log('[DEBUG] Live polling completed with status:', status.status);
+                        clearInterval(livePollingInterval);
+                    }
+                } else {
+                    console.log('[DEBUG] Live polling: Invalid response');
+                    updateLiveStatus('ERROR', 'unknown', 'Failed to get status');
+                }
+            })
+            .catch(function(error) {
+                console.error('[DEBUG] Live polling error:', error);
+                updateLiveStatus('ERROR', 'unknown', 'Status check failed: ' + error.message);
+            });
+        }
+        
+        function updateLiveStatus(status, progress, message, error) {
+            var statusSpan = document.querySelector('#liveStatus p:first-child strong:nth-child(2)');
+            var progressText = document.getElementById('progressText');
+            var statusMessage = document.getElementById('statusMessage');
+            
+            if (statusSpan) {
+                var statusColor = 'orange';
+                var statusIcon = '⏳';
+                var statusText = status;
+                
+                if (status === 'FIN') {
+                    statusColor = 'green';
+                    statusIcon = '✅';
+                    statusText = 'COMPLETED';
+                    message = '🎉 Configuration has been successfully committed to the firewall!';
+                } else if (status === 'FAIL' || status === 'ERROR') {
+                    statusColor = 'red';
+                    statusIcon = '❌';
+                    statusText = 'FAILED';
+                    message = '⚠️ Commit failed. Please check firewall logs.';
+                } else if (status === 'ACT') {
+                    statusColor = 'blue';
+                    statusIcon = '🔄';
+                    statusText = 'ACTIVE';
+                    message = '⚙️ Configuration is being applied to the firewall...';
+                } else if (status === 'PEND') {
+                    statusColor = 'orange';
+                    statusIcon = '⏳';
+                    statusText = 'PENDING';
+                    message = '📋 Commit is queued and waiting to start...';
+                } else if (status === 'TIMEOUT') {
+                    statusColor = 'orange';
+                    statusIcon = '⏰';
+                    statusText = 'TIMEOUT';
+                }
+                
+                statusSpan.innerHTML = '<span style="color: ' + statusColor + ';">' + statusIcon + ' ' + statusText + '</span>';
+            }
+            
+            if (progressText) {
+                progressText.textContent = progress + '%';
+            }
+            
+            if (statusMessage && message) {
+                statusMessage.innerHTML = message;
+                if (error) {
+                    statusMessage.innerHTML += '<br><small style="color: red;">Error: ' + error + '</small>';
+                }
+            }
+        }
+        
+        function checkCommitStatus(jobId) {
+            console.log('[DEBUG] Checking commit status for job:', jobId);
+            
+            fetch('/commit_status', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({job_id: jobId})
+            })
+            .then(function(response) {
+                console.log('[DEBUG] Commit status response:', response.status);
+                
+                var contentType = response.headers.get('Content-Type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response for commit status');
+                }
+                
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                
+                return response.json();
+            })
+            .then(function(data) {
+                console.log('[DEBUG] Commit status data:', data);
+                
+                var statusDiv = document.querySelector('.commit-status');
+                if (data.success && statusDiv && data.status) {
+                    var status = data.status;
+                    var statusHTML = '<h3>🔄 Commit Status (Updated):</h3>';
+                    statusHTML += '<p><strong>Job ID:</strong> ' + jobId + '</p>';
+                    statusHTML += '<p><strong>Status:</strong> ' + status.status + '</p>';
+                    statusHTML += '<p><strong>Progress:</strong> ' + status.progress + '%</p>';
+                    
+                    if (status.status === 'FIN') {
+                        statusHTML += '<p style="color: green;">✅ Commit completed successfully!</p>';
+                    } else if (status.status === 'FAIL' || status.status === 'ERROR') {
+                        statusHTML += '<p style="color: red;">❌ Commit failed</p>';
+                        if (status.error) {
+                            statusHTML += '<p style="color: red; font-size: 12px;">Error: ' + status.error + '</p>';
+                        }
+                    } else if (status.status !== 'FIN') {
+                        statusHTML += '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Refresh Status</button>';
+                    }
+                    
+                    statusDiv.innerHTML = statusHTML;
+                } else {
+                    console.error('[DEBUG] Invalid commit status response:', data);
+                    var statusDiv = document.querySelector('.commit-status');
+                    if (statusDiv) {
+                        statusDiv.innerHTML = '<p style="color: orange;">⚠️ Could not get current status. Job may still be processing.</p>';
+                    }
+                }
+            })
+            .catch(function(error) {
+                console.error('[DEBUG] Commit status check failed:', error);
+                var statusDiv = document.querySelector('.commit-status');
+                if (statusDiv) {
+                    var errorMsg = 'Status check failed: ' + error.message;
+                    if (error.message.includes('non-JSON response')) {
+                        errorMsg = 'Server error: Could not get commit status. The job may still be processing.';
+                    }
+                    statusDiv.innerHTML = '<p style="color: orange;">⚠️ ' + errorMsg + '</p>' +
+                                        '<button class="btn" onclick="checkCommitStatus(' + "'" + jobId + "'" + ')">Try Again</button>';
+                }
+            });
+        }
+        
+        function startOver() {
+            window.location.reload();
+        }
+        
+        console.log('[DEBUG] Dashboard script loaded successfully');
+    </script>
 </body>
 </html>
 '''

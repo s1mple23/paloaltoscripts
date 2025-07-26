@@ -167,26 +167,25 @@ def register_routes(app: Flask):
                     'search_term': search_result.search_term,
                     'action_type': search_result.action_type,
                     'strategy_info': strategy_info,
-                    'debug_info': debug_info
+                    'debug_info': debug_info,
+                    'message': f"Search completed successfully. Found {len(search_result.urls)} URLs." if len(search_result.urls) > 0 else "Search completed successfully. No blocked URLs found matching your criteria."
                 }
                 
                 print(f"[DEBUG] Returning success response with {len(search_result.urls)} URLs")
                 return jsonify(response_data)
             else:
-                # Provide helpful error messages
-                error_msg = search_result.error if search_result.error else "Search completed but encountered issues"
+                # Provide helpful error messages for real errors only
+                error_msg = search_result.error if search_result.error else "Search encountered technical issues"
                 
-                # More specific error handling
-                if error_msg and "timeout" in error_msg.lower():
+                # More specific error handling for actual errors
+                if error_msg and "timed out" in error_msg.lower():
                     error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
                 elif error_msg and "connection" in error_msg.lower():
                     error_msg = "Could not connect to the firewall. Please check your connection and try again."
-                elif error_msg and "unauthorized" in error_msg.lower() or (error_msg and "authentication" in error_msg.lower()):
+                elif error_msg and "authentication" in error_msg.lower():
                     error_msg = "Authentication expired. Please log in again."
                 elif error_msg and "no valid search terms" in error_msg.lower():
                     error_msg = "Please provide valid search terms. Use comma-separated values for multiple terms."
-                elif not error_msg or error_msg == "Unknown search error":
-                    error_msg = "Search completed successfully but no URLs were found matching your criteria."
                 
                 print(f"[DEBUG] Returning error response: {error_msg}")
                 return jsonify({'success': False, 'error': error_msg})
