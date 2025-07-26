@@ -174,15 +174,19 @@ def register_routes(app: Flask):
                 return jsonify(response_data)
             else:
                 # Provide helpful error messages
-                error_msg = search_result.error or "Unknown search error"
-                if "timeout" in error_msg.lower():
+                error_msg = search_result.error if search_result.error else "Search completed but encountered issues"
+                
+                # More specific error handling
+                if error_msg and "timeout" in error_msg.lower():
                     error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
-                elif "connection" in error_msg.lower():
+                elif error_msg and "connection" in error_msg.lower():
                     error_msg = "Could not connect to the firewall. Please check your connection and try again."
-                elif "unauthorized" in error_msg.lower() or "authentication" in error_msg.lower():
+                elif error_msg and "unauthorized" in error_msg.lower() or (error_msg and "authentication" in error_msg.lower()):
                     error_msg = "Authentication expired. Please log in again."
-                elif "no valid search terms" in error_msg.lower():
+                elif error_msg and "no valid search terms" in error_msg.lower():
                     error_msg = "Please provide valid search terms. Use comma-separated values for multiple terms."
+                elif not error_msg or error_msg == "Unknown search error":
+                    error_msg = "Search completed successfully but no URLs were found matching your criteria."
                 
                 print(f"[DEBUG] Returning error response: {error_msg}")
                 return jsonify({'success': False, 'error': error_msg})
