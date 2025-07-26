@@ -1,5 +1,6 @@
 """
-HTML Templates for the web interface
+Enhanced HTML Templates for the web interface
+Now supports multiple search terms and manual URL input
 """
 from config import config
 
@@ -52,7 +53,7 @@ LOGIN_TEMPLATE = '''
         
         <div class="info">
             Enter your firewall credentials to begin URL whitelisting management<br>
-            <small>Version {{ config.VERSION }} - {{ config.DESCRIPTION }}</small>
+            <small>Version {{ config.VERSION }} - Enhanced Multi-URL Search with Manual Input</small>
         </div>
     </div>
 </body>
@@ -65,7 +66,7 @@ DASHBOARD_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>URL Whitelisting Dashboard</title>
+    <title>Enhanced URL Whitelisting Dashboard</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
         .header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
@@ -103,25 +104,36 @@ DASHBOARD_TEMPLATE = '''
         .action-selection label { font-weight: normal; display: inline-block; margin-right: 20px; }
         .action-selection input[type="radio"] { margin-right: 5px; }
         .timing-info { background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; font-weight: bold; }
+        .multi-search-info { background: #e1f5fe; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #01579b; }
+        .manual-url-section { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; border: 1px solid #dee2e6; }
+        .validation-message { margin-top: 10px; padding: 8px; border-radius: 4px; font-size: 14px; }
+        .validation-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .validation-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .validation-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>🔒 URL Whitelisting Dashboard</h1>
-        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Targeted Search</div>
+        <h1>🔒 Enhanced URL Whitelisting Dashboard</h1>
+        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Multi-URL Search + Manual Input</div>
         <a href="{{ url_for('logout') }}" class="btn btn-secondary logout">Logout</a>
     </div>
 
-    <!-- Step 1: Search for Blocked URLs -->
+    <!-- Step 1: Enhanced Search for Blocked URLs -->
     <div class="section step active" id="step1">
-        <h2><span class="step-number">1</span>Search Blocked URLs</h2>
+        <h2><span class="step-number">1</span>Enhanced URL Search</h2>
         
         <div class="timing-info">
             ⏱️ <strong>Search Duration:</strong> Each search takes approximately 2 minutes (4 attempts with timeouts: {{ config.SEARCH_TIMEOUT_ATTEMPTS|join(', ') }}s + processing time)
         </div>
         
-        <div class="filtering-info">
-            ℹ️ <strong>Targeted Search System:</strong> Choose ONE action type to search for. The system will run {{ config.SEARCH_TIMEOUT_ATTEMPTS|length }} attempts with different timeouts to ensure reliable results. Searches the last {{ config.LOOKBACK_MONTHS }} months with up to {{ config.DEFAULT_MAX_RESULTS }} entries.
+        <div class="multi-search-info">
+            🎯 <strong>Enhanced Multi-URL Search System:</strong><br>
+            • <strong>Single Term:</strong> Enter one search term (e.g., "youtube")<br>
+            • <strong>Multiple Terms:</strong> Enter comma-separated terms (e.g., "youtube, facebook, twitch")<br>
+            • <strong>OR Logic:</strong> System automatically uses OR logic for multiple terms<br>
+            • <strong>Manual URLs:</strong> Add additional URLs manually after search<br>
+            • <strong>Time Range:</strong> Searches last {{ config.LOOKBACK_MONTHS }} months with up to {{ config.DEFAULT_MAX_RESULTS }} entries
         </div>
         
         {% if messages %}
@@ -132,8 +144,12 @@ DASHBOARD_TEMPLATE = '''
         
         <form id="searchForm">
             <div class="form-group">
-                <label for="search_term">Search Term (partial URL/domain):</label>
-                <input type="text" id="search_term" name="search_term" placeholder="e.g., youtube, facebook, google">
+                <label for="search_term">Search Terms (single or comma-separated):</label>
+                <input type="text" id="search_term" name="search_term" 
+                       placeholder="Examples: youtube  OR  youtube, facebook, activision, playstation">
+                <small style="color: #666; font-size: 12px;">
+                    💡 For multiple terms, separate with commas. System will search for URLs containing ANY of these terms.
+                </small>
             </div>
             
             <div class="action-selection">
@@ -148,20 +164,22 @@ DASHBOARD_TEMPLATE = '''
                 </label>
             </div>
             
-            <button type="submit" class="btn">Start Targeted Search (~2 minutes)</button>
+            <button type="submit" class="btn">Start Enhanced Search (~2 minutes)</button>
             <button type="button" class="btn btn-secondary" onclick="debugLogs()">Debug Connection</button>
         </form>
         
         <div id="debugResults" style="display: none; margin-top: 15px;"></div>
     </div>
 
-    <!-- Step 2: Select URLs and Options -->
+    <!-- Step 2: Enhanced URL Selection with Manual Input -->
     <div class="section step" id="step2">
-        <h2><span class="step-number">2</span>Select URLs to Whitelist</h2>
+        <h2><span class="step-number">2</span>Select URLs & Add Manual URLs</h2>
         
         <div id="urlSelection">
             <!-- Search results will appear here -->
         </div>
+        
+        <!-- Manual URL Input Section (will be dynamically added) -->
         
         <div class="whitelist-options" id="whitelistOptions" style="display: none;">
             <h3>Whitelisting Options:</h3>
@@ -210,7 +228,7 @@ DASHBOARD_TEMPLATE = '''
         
         <div id="finalSummary"></div>
         
-        <button class="btn btn-success" onclick="submitWhitelist()" id="submitBtn">Submit Whitelist Request</button>
+        <button class="btn btn-success" onclick="submitWhitelist()" id="submitBtn">Submit Enhanced Whitelist Request</button>
     </div>
 
     <!-- Step 5: Results -->
@@ -230,5 +248,5 @@ def get_login_template():
     return LOGIN_TEMPLATE
 
 def get_dashboard_template():
-    """Get dashboard template with config injected"""
+    """Get enhanced dashboard template with config injected"""
     return DASHBOARD_TEMPLATE

@@ -1,10 +1,12 @@
 /**
- * Dashboard JavaScript for Palo Alto Whitelist Tool
+ * Enhanced Dashboard JavaScript for Palo Alto Whitelist Tool
+ * Supports multiple search terms and manual URL addition
  */
 
 // Global variables
 var selectedUrls = [];
 var searchResults = [];
+var manualUrls = [];
 var categories = {};
 var selectedActionType = 'block-url';
 
@@ -12,7 +14,7 @@ var selectedActionType = 'block-url';
  * Initialize the dashboard when DOM is loaded
  */
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('[DEBUG] Dashboard initialized');
+    console.log('[DEBUG] Enhanced Dashboard initialized');
     
     // Attach event listeners
     document.getElementById('searchForm').addEventListener('submit', handleSearchSubmit);
@@ -21,37 +23,55 @@ document.addEventListener('DOMContentLoaded', function() {
     var wildcardMatch = document.getElementById('wildcardMatch');
     if (exactMatch) exactMatch.addEventListener('change', updateUrlPreview);
     if (wildcardMatch) wildcardMatch.addEventListener('change', updateUrlPreview);
+    
+    // Add manual URL input handlers
+    var manualUrlInput = document.getElementById('manualUrls');
+    if (manualUrlInput) {
+        manualUrlInput.addEventListener('input', validateManualUrls);
+    }
 });
 
 /**
- * Handle search form submission
+ * Handle search form submission with multiple terms support
  */
 function handleSearchSubmit(e) {
     e.preventDefault();
-    console.log('[DEBUG] Search form submitted with targeted strategy');
+    console.log('[DEBUG] Search form submitted with enhanced multi-term strategy');
     
-    var searchTerm = document.getElementById('search_term').value.trim();
+    var searchTerms = document.getElementById('search_term').value.trim();
     selectedActionType = document.querySelector('input[name="action_type"]:checked').value;
     
-    console.log('[DEBUG] Search term:', searchTerm);
+    console.log('[DEBUG] Search terms:', searchTerms);
     console.log('[DEBUG] Action type:', selectedActionType);
     
-    if (!searchTerm) {
-        alert('Please enter a search term');
+    if (!searchTerms) {
+        alert('Please enter at least one search term');
+        return;
+    }
+    
+    // Validate search terms
+    var terms = searchTerms.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    if (terms.length === 0) {
+        alert('Please enter valid search terms');
         return;
     }
     
     var resultsDiv = document.getElementById('urlSelection');
     var searchBtn = e.target.querySelector('button[type="submit"]');
     
-    console.log('[DEBUG] Starting targeted search request...');
+    console.log('[DEBUG] Starting enhanced multi-term search request...');
     
     searchBtn.disabled = true;
     searchBtn.textContent = 'Searching... (~2 min)';
     
     activateStep(2);
     
-    resultsDiv.innerHTML = '<div class="loading">🎯 Targeted search for "' + searchTerm + '" with action "' + selectedActionType + '"...<br>' +
+    // Show different message based on number of terms
+    var searchMessage = terms.length === 1 
+        ? `🎯 Targeted search for "${terms[0]}" with action "${selectedActionType}"`
+        : `🎯 Multi-term search for ${terms.length} terms (${terms.join(', ')}) with OR logic and action "${selectedActionType}"`;
+    
+    resultsDiv.innerHTML = '<div class="loading">' + searchMessage + '...<br>' +
                           '<small>⏱️ Running 4 attempts with timeouts: 10s, 15s, 25s, 35s<br>' +
                           'Searching last 3 months, up to 3,000 entries<br>' +
                           '<strong>Estimated time: ~2 minutes - Please wait...</strong></small></div>';
@@ -62,7 +82,7 @@ function handleSearchSubmit(e) {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-            search_term: searchTerm,
+            search_term: searchTerms,
             action_type: selectedActionType
         })
     })
@@ -76,50 +96,68 @@ function handleSearchSubmit(e) {
         if (data.success) {
             console.log('[DEBUG] Search successful, found URLs:', data.urls);
             searchResults = data.urls;
-            displaySearchResults(data.urls, searchTerm, selectedActionType);
+            displaySearchResults(data.urls, searchTerms, selectedActionType, data.debug_info);
+            showManualUrlInput(); // Show manual URL input after search
         } else {
             console.log('[DEBUG] Search failed:', data.error);
             resultsDiv.innerHTML = '<div class="error">Error: ' + data.error + '</div>';
+            showManualUrlInput(); // Show manual URL input even on search failure
         }
     })
     .catch(function(error) {
         console.error('[DEBUG] Fetch error:', error);
         resultsDiv.innerHTML = '<div class="error">Network error: ' + error.message + '</div>';
+        showManualUrlInput(); // Show manual URL input on network error
     })
     .finally(function() {
         console.log('[DEBUG] Search request completed');
         searchBtn.disabled = false;
-        searchBtn.textContent = 'Start Targeted Search (~2 minutes)';
+        searchBtn.textContent = 'Start Enhanced Search (~2 minutes)';
     });
 }
 
 /**
- * Display search results
+ * Display search results with enhanced information
  */
-function displaySearchResults(urls, searchTerm, actionType) {
+function displaySearchResults(urls, searchTerms, actionType, debugInfo) {
     var resultsDiv = document.getElementById('urlSelection');
+    var terms = searchTerms.split(',').map(t => t.trim()).filter(t => t.length > 0);
+    
+    var html = '';
     
     if (urls.length === 0) {
-        resultsDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #666;">' +
-            '<h4>No blocked URLs found</h4>' +
-            '<p>No URLs containing "' + searchTerm + '" found with action: <strong>' + actionType + '</strong></p>' +
-            '<p><small>Searched last 3 months with 4 timeout attempts (10s, 15s, 25s, 35s)</small></p>' +
+        html = '<div style="text-align: center; padding: 20px; color: #666;">' +
+            '<h4>No blocked URLs found</h4>';
+        
+        if (terms.length === 1) {
+            html += '<p>No URLs containing "' + terms[0] + '" found with action: <strong>' + actionType + '</strong></p>';
+        } else {
+            html += '<p>No URLs containing any of the terms (' + terms.join(', ') + ') found with action: <strong>' + actionType + '</strong></p>';
+        }
+        
+        html += '<p><small>Searched last 3 months with 4 timeout attempts and OR logic for multiple terms</small></p>' +
             '</div>';
-        return;
-    }
-    
-    var html = '<h3>🎯 Found ' + urls.length + ' blocked URLs (targeted search - action: ' + actionType + '):</h3>';
-    html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
-           '✅ <strong>Targeted Results:</strong> Searched specifically for action "' + actionType + '" with 4 timeout attempts for reliability.<br>' +
-           '📅 <strong>Time Range:</strong> Last 3 months, up to 3,000 entries<br>' +
-           'Click the checkboxes below to select URLs for whitelisting:</div>';
-    
-    for (var i = 0; i < urls.length; i++) {
-        var url = urls[i];
-        html += '<div class="url-item" style="margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white;">';
-        html += '<input type="checkbox" id="url_' + i + '" value="' + url + '" style="margin-right: 10px; transform: scale(1.2);" onclick="updateSelectedUrls()">';
-        html += '<label for="url_' + i + '" style="cursor: pointer; user-select: none;">' + url + '</label>';
-        html += '</div>';
+    } else {
+        html = '<h3>🎯 Found ' + urls.length + ' blocked URLs:</h3>';
+        
+        if (terms.length === 1) {
+            html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
+                   '✅ <strong>Single-term Results:</strong> Searched for "' + terms[0] + '" with action "' + actionType + '"<br>';
+        } else {
+            html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
+                   '✅ <strong>Multi-term OR Results:</strong> Searched for ' + terms.length + ' terms (' + terms.join(', ') + ') with action "' + actionType + '"<br>';
+        }
+        
+        html += '📅 <strong>Time Range:</strong> Last 3 months, up to 3,000 entries<br>' +
+               'Click the checkboxes below to select URLs for whitelisting:</div>';
+        
+        for (var i = 0; i < urls.length; i++) {
+            var url = urls[i];
+            html += '<div class="url-item" style="margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white;">';
+            html += '<input type="checkbox" id="url_' + i + '" value="' + url + '" style="margin-right: 10px; transform: scale(1.2);" onclick="updateSelectedUrls()">';
+            html += '<label for="url_' + i + '" style="cursor: pointer; user-select: none;">' + url + '</label>';
+            html += '</div>';
+        }
     }
     
     resultsDiv.innerHTML = html;
@@ -130,6 +168,158 @@ function displaySearchResults(urls, searchTerm, actionType) {
             attachLabelClickHandler(i);
         }
     }, 100);
+}
+
+/**
+ * Show manual URL input section
+ */
+function showManualUrlInput() {
+    var manualSection = document.getElementById('manualUrlSection');
+    if (manualSection) {
+        manualSection.style.display = 'block';
+    } else {
+        // Create manual URL input section if it doesn't exist
+        var urlSelection = document.getElementById('urlSelection');
+        var manualHtml = '<div id="manualUrlSection" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">' +
+                        '<h4>📝 Add Manual URLs</h4>' +
+                        '<p>You can also add URLs manually (one per line or comma-separated):</p>' +
+                        '<textarea id="manualUrls" placeholder="Example:&#10;youtube.com&#10;facebook.com&#10;*.google.com&#10;or: youtube.com, facebook.com, *.google.com" ' +
+                        'style="width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"></textarea>' +
+                        '<div id="manualUrlValidation" style="margin-top: 10px;"></div>' +
+                        '<button type="button" class="btn" onclick="addManualUrls()" style="margin-top: 10px;">Add Manual URLs</button>' +
+                        '</div>';
+        
+        urlSelection.insertAdjacentHTML('afterend', manualHtml);
+        
+        // Add event listener for validation
+        var manualUrlInput = document.getElementById('manualUrls');
+        if (manualUrlInput) {
+            manualUrlInput.addEventListener('input', validateManualUrls);
+        }
+    }
+}
+
+/**
+ * Validate manual URLs as user types
+ */
+function validateManualUrls() {
+    var input = document.getElementById('manualUrls').value.trim();
+    var validationDiv = document.getElementById('manualUrlValidation');
+    
+    if (!input) {
+        validationDiv.innerHTML = '';
+        return;
+    }
+    
+    fetch('/validate_manual_urls', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({manual_urls: input})
+    })
+    .then(function(response) {
+        return response.json();
+    })
+    .then(function(data) {
+        if (data.success) {
+            var html = '';
+            if (data.valid_urls.length > 0) {
+                html += '<div style="color: green;">✅ Valid URLs (' + data.valid_urls.length + '): ' + data.valid_urls.join(', ') + '</div>';
+            }
+            if (data.invalid_urls.length > 0) {
+                html += '<div style="color: red;">❌ Invalid URLs (' + data.invalid_urls.length + '): ' + data.invalid_urls.join(', ') + '</div>';
+            }
+            validationDiv.innerHTML = html;
+        }
+    })
+    .catch(function(error) {
+        validationDiv.innerHTML = '<div style="color: orange;">⚠️ Validation temporarily unavailable</div>';
+    });
+}
+
+/**
+ * Add manual URLs to the selection
+ */
+function addManualUrls() {
+    var input = document.getElementById('manualUrls').value.trim();
+    if (!input) {
+        alert('Please enter some URLs');
+        return;
+    }
+    
+    fetch('/validate_manual_urls', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({manual_urls: input})
+    })
+    .then(function(response) {
+        return response.json();
+    })
+    .then(function(data) {
+        if (data.success && data.valid_urls.length > 0) {
+            // Add valid URLs to manual list
+            data.valid_urls.forEach(function(url) {
+                if (manualUrls.indexOf(url) === -1) {
+                    manualUrls.push(url);
+                }
+            });
+            
+            // Clear input
+            document.getElementById('manualUrls').value = '';
+            document.getElementById('manualUrlValidation').innerHTML = '';
+            
+            // Update display
+            displayManualUrls();
+            updateSelectedUrls();
+            
+            alert('Added ' + data.valid_urls.length + ' valid URLs to selection');
+            
+            if (data.invalid_urls.length > 0) {
+                alert('Note: ' + data.invalid_urls.length + ' invalid URLs were ignored: ' + data.invalid_urls.join(', '));
+            }
+        } else {
+            alert('No valid URLs found. Please check your input.');
+        }
+    })
+    .catch(function(error) {
+        alert('Error validating URLs: ' + error.message);
+    });
+}
+
+/**
+ * Display manual URLs
+ */
+function displayManualUrls() {
+    var manualSection = document.getElementById('manualUrlSection');
+    var existingDisplay = document.getElementById('manualUrlDisplay');
+    
+    if (existingDisplay) {
+        existingDisplay.remove();
+    }
+    
+    if (manualUrls.length > 0) {
+        var html = '<div id="manualUrlDisplay" style="margin-top: 15px; padding: 10px; background: #e8f5e8; border-radius: 4px;">' +
+                  '<h5>📋 Manual URLs (' + manualUrls.length + '):</h5>';
+        
+        for (var i = 0; i < manualUrls.length; i++) {
+            html += '<div style="margin: 5px 0; padding: 5px; background: white; border-radius: 3px; display: flex; align-items: center;">' +
+                   '<input type="checkbox" id="manual_' + i + '" checked style="margin-right: 10px;" onclick="updateSelectedUrls()">' +
+                   '<span style="flex: 1;">' + manualUrls[i] + '</span>' +
+                   '<button onclick="removeManualUrl(' + i + ')" style="padding: 2px 8px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Remove</button>' +
+                   '</div>';
+        }
+        
+        html += '</div>';
+        manualSection.insertAdjacentHTML('afterend', html);
+    }
+}
+
+/**
+ * Remove manual URL
+ */
+function removeManualUrl(index) {
+    manualUrls.splice(index, 1);
+    displayManualUrls();
+    updateSelectedUrls();
 }
 
 /**
@@ -152,14 +342,24 @@ function attachLabelClickHandler(index) {
 }
 
 /**
- * Update selected URLs
+ * Update selected URLs (both search results and manual URLs)
  */
 function updateSelectedUrls() {
     selectedUrls = [];
+    
+    // Add selected search results
     for (var i = 0; i < searchResults.length; i++) {
         var checkbox = document.getElementById('url_' + i);
         if (checkbox && checkbox.checked) {
             selectedUrls.push(searchResults[i]);
+        }
+    }
+    
+    // Add selected manual URLs
+    for (var i = 0; i < manualUrls.length; i++) {
+        var checkbox = document.getElementById('manual_' + i);
+        if (checkbox && checkbox.checked) {
+            selectedUrls.push(manualUrls[i]);
         }
     }
     
@@ -190,12 +390,30 @@ function updateUrlPreview() {
     var html = '<ul>';
     for (var i = 0; i < selectedUrls.length; i++) {
         var url = selectedUrls[i];
-        var domain = url.endsWith('/') ? url : url + '/';
-        if (exactMatch) {
-            html += '<li>' + domain + '</li>';
-        }
-        if (wildcardMatch) {
-            html += '<li>*.' + domain + '</li>';
+        
+        // Handle different URL formats
+        if (url.startsWith('*.')) {
+            // Already a wildcard
+            if (wildcardMatch) {
+                html += '<li>' + url + '</li>';
+            }
+            if (exactMatch) {
+                // Remove wildcard for exact match
+                var exactUrl = url.substring(2);
+                if (!exactUrl.endsWith('/')) {
+                    exactUrl += '/';
+                }
+                html += '<li>' + exactUrl + '</li>';
+            }
+        } else {
+            // Regular domain
+            var domain = url.endsWith('/') ? url : url + '/';
+            if (exactMatch) {
+                html += '<li>' + domain + '</li>';
+            }
+            if (wildcardMatch) {
+                html += '<li>*.' + domain + '</li>';
+            }
         }
     }
     html += '</ul>';
@@ -275,9 +493,25 @@ function updateFinalSummary() {
     var urlsToAdd = [];
     for (var i = 0; i < selectedUrls.length; i++) {
         var url = selectedUrls[i];
-        var domain = url.endsWith('/') ? url : url + '/';
-        if (exactMatch) urlsToAdd.push(domain);
-        if (wildcardMatch) urlsToAdd.push('*.' + domain);
+        
+        if (url.startsWith('*.')) {
+            // Already a wildcard
+            if (wildcardMatch) {
+                urlsToAdd.push(url);
+            }
+            if (exactMatch) {
+                var exactUrl = url.substring(2);
+                if (!exactUrl.endsWith('/')) {
+                    exactUrl += '/';
+                }
+                urlsToAdd.push(exactUrl);
+            }
+        } else {
+            // Regular domain
+            var domain = url.endsWith('/') ? url : url + '/';
+            if (exactMatch) urlsToAdd.push(domain);
+            if (wildcardMatch) urlsToAdd.push('*.' + domain);
+        }
     }
     
     var summaryDiv = document.getElementById('finalSummary');
@@ -286,9 +520,14 @@ function updateFinalSummary() {
         urlsList += '<li>' + urlsToAdd[i] + '</li>';
     }
     
+    var searchInfo = searchResults.length > 0 ? ' (' + searchResults.length + ' from search' : '';
+    var manualInfo = manualUrls.length > 0 ? ', ' + manualUrls.length + ' manual' : '';
+    var sourceInfo = searchInfo + manualInfo + (searchInfo ? ')' : '');
+    
     summaryDiv.innerHTML = '<div><h3>Summary:</h3>' +
                           '<p><strong>Search Action:</strong> ' + selectedActionType + '</p>' +
                           '<p><strong>Category:</strong> ' + categorySelect.value + '</p>' +
+                          '<p><strong>Total URLs selected:</strong> ' + selectedUrls.length + sourceInfo + '</p>' +
                           '<p><strong>URLs to add:</strong></p><ul>' + urlsList + '</ul></div>';
 }
 
@@ -314,9 +553,25 @@ function submitWhitelist() {
     var urlsToAdd = [];
     for (var i = 0; i < selectedUrls.length; i++) {
         var url = selectedUrls[i];
-        var domain = url.endsWith('/') ? url : url + '/';
-        if (exactMatch) urlsToAdd.push(domain);
-        if (wildcardMatch) urlsToAdd.push('*.' + domain);
+        
+        if (url.startsWith('*.')) {
+            // Already a wildcard
+            if (wildcardMatch) {
+                urlsToAdd.push(url);
+            }
+            if (exactMatch) {
+                var exactUrl = url.substring(2);
+                if (!exactUrl.endsWith('/')) {
+                    exactUrl += '/';
+                }
+                urlsToAdd.push(exactUrl);
+            }
+        } else {
+            // Regular domain
+            var domain = url.endsWith('/') ? url : url + '/';
+            if (exactMatch) urlsToAdd.push(domain);
+            if (wildcardMatch) urlsToAdd.push('*.' + domain);
+        }
     }
     
     var submitBtn = document.getElementById('submitBtn');

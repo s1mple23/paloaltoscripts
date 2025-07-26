@@ -1,10 +1,11 @@
 """
 URL Search Service
-Handles targeted URL searching with multiple timeout attempts
+Handles targeted URL searching with multiple search terms and manual URL addition
 """
 from datetime import datetime, timedelta
 from typing import List, Set
 import time
+import re
 
 from config import config
 from models.ticket import SearchResult, SearchAttempt
@@ -16,41 +17,43 @@ class SearchService:
     def __init__(self, api_client):
         self.api_client = api_client
     
-    def search_blocked_urls(self, search_term: str, action_type: str = 'block-url') -> SearchResult:
+    def search_blocked_urls(self, search_terms: str, action_type: str = 'block-url') -> SearchResult:
         """
-        Execute targeted search with multiple timeout attempts
+        Execute targeted search with multiple search terms using OR logic
         
         Args:
-            search_term: Search term to look for
+            search_terms: Comma-separated search terms to look for
             action_type: Action type to filter on ('block-url' or 'block-continue')
             
         Returns:
             SearchResult object with found URLs and metadata
         """
         try:
-            # Validate inputs
-            if not validate_search_term(search_term):
+            # Parse and validate search terms
+            parsed_terms = self._parse_search_terms(search_terms)
+            if not parsed_terms:
                 return SearchResult(
                     urls=[],
-                    search_term=search_term,
+                    search_term=search_terms,
                     action_type=action_type,
                     strategy_info={},
                     success=False,
-                    error="Invalid search term"
+                    error="No valid search terms provided"
                 )
             
+            # Validate action type
             if not validate_action_type(action_type):
                 return SearchResult(
                     urls=[],
-                    search_term=search_term,
+                    search_term=search_terms,
                     action_type=action_type,
                     strategy_info={},
                     success=False,
                     error="Invalid action type"
                 )
             
-            print(f"[DEBUG] Starting TARGETED search for: {search_term}")
-            print(f"[DEBUG] Strategy: Single action '{action_type}' with multiple timeout attempts")
+            print(f"[DEBUG] Starting MULTI-TERM search for: {parsed_terms}")
+            print(f"[DEBUG] Strategy: Multiple terms with OR logic, action '{action_type}', multiple timeout attempts")
             
             blocked_urls = set()
             attempts = []
@@ -61,33 +64,37 @@ class SearchService:
             
             print(f"[DEBUG] Time filter: >= {time_filter}")
             
-            # Build the targeted query with time filter
-            base_query = f"( url contains '{search_term}' ) and ( action eq '{action_type}' ) and ( receive_time geq {time_filter} )"
+            # Build the multi-term OR query
+            base_query = self._build_multi_term_query(parsed_terms, action_type, time_filter)
             
             # Execute multiple timeout attempts
-            attempts = self._execute_timeout_attempts(base_query, search_term, blocked_urls)
+            attempts = self._execute_timeout_attempts(base_query, search_terms, blocked_urls)
             
             # Prepare results
             final_urls = sorted(list(blocked_urls))
             successful_attempts = sum(1 for attempt in attempts if attempt.success)
             
             strategy_info = {
-                'search_term': search_term,
+                'search_terms': parsed_terms,
+                'search_terms_count': len(parsed_terms),
+                'original_input': search_terms,
                 'action_type': action_type,
                 'results_found': len(final_urls),
-                'search_strategy': 'targeted_single_action_multiple_timeouts',
+                'search_strategy': 'multi_term_or_logic_multiple_timeouts',
                 'lookback_period': f'{config.LOOKBACK_MONTHS}_months',
                 'max_entries': config.DEFAULT_MAX_RESULTS,
                 'successful_attempts': f'{successful_attempts}/{len(attempts)}',
-                'timeout_attempts': [attempt.to_dict() for attempt in attempts]
+                'timeout_attempts': [attempt.to_dict() for attempt in attempts],
+                'query_used': base_query
             }
             
-            print(f"[DEBUG] TARGETED Final results: {len(final_urls)} unique URLs")
+            print(f"[DEBUG] MULTI-TERM Final results: {len(final_urls)} unique URLs")
+            print(f"[DEBUG] Search terms used: {parsed_terms}")
             print(f"[DEBUG] Found URLs: {final_urls}")
             
             return SearchResult(
                 urls=final_urls,
-                search_term=search_term,
+                search_term=search_terms,
                 action_type=action_type,
                 strategy_info=strategy_info,
                 success=True
@@ -100,14 +107,47 @@ class SearchService:
             
             return SearchResult(
                 urls=[],
-                search_term=search_term,
+                search_term=search_terms,
                 action_type=action_type,
                 strategy_info={},
                 success=False,
                 error=str(e)
             )
     
-    def _execute_timeout_attempts(self, base_query: str, search_term: str, blocked_urls: Set[str]) -> List[SearchAttempt]:
+    def _parse_search_terms(self, search_terms: str) -> List[str]:
+        """Parse and validate multiple search terms"""
+        if not search_terms:
+            return []
+        
+        # Split by comma and clean up
+        terms = []
+        raw_terms = search_terms.split(',')
+        
+        for term in raw_terms:
+            cleaned_term = term.strip()
+            if cleaned_term and validate_search_term(cleaned_term):
+                terms.append(cleaned_term)
+            elif cleaned_term:
+                print(f"[DEBUG] Skipping invalid search term: '{cleaned_term}'")
+        
+        return terms
+    
+    def _build_multi_term_query(self, search_terms: List[str], action_type: str, time_filter: str) -> str:
+        """Build query with OR logic for multiple search terms"""
+        if len(search_terms) == 1:
+            # Single term - use simple query
+            url_condition = f"url contains '{search_terms[0]}'"
+        else:
+            # Multiple terms - use OR logic
+            url_conditions = [f"url contains '{term}'" for term in search_terms]
+            url_condition = f"( {' ) or ( '.join(url_conditions)} )"
+        
+        query = f"( {url_condition} ) and ( action eq '{action_type}' ) and ( receive_time geq {time_filter} )"
+        
+        print(f"[DEBUG] Built query: {query}")
+        return query
+    
+    def _execute_timeout_attempts(self, base_query: str, search_terms: str, blocked_urls: Set[str]) -> List[SearchAttempt]:
         """Execute multiple timeout attempts for reliability"""
         attempts = []
         
@@ -126,7 +166,7 @@ class SearchService:
             urls_before = len(blocked_urls)
             attempt = self._execute_single_attempt(
                 base_query, 
-                search_term, 
+                search_terms, 
                 blocked_urls, 
                 timeout, 
                 config.DEFAULT_MAX_RESULTS, 
@@ -150,7 +190,7 @@ class SearchService:
         
         return attempts
     
-    def _execute_single_attempt(self, query: str, search_term: str, blocked_urls: Set[str], 
+    def _execute_single_attempt(self, query: str, search_terms: str, blocked_urls: Set[str], 
                                timeout: int, nlogs: int, attempt_name: str) -> SearchAttempt:
         """Execute a single search attempt"""
         print(f"[DEBUG] {attempt_name}: Executing query with {timeout}s timeout, {nlogs} max logs")
@@ -168,7 +208,7 @@ class SearchService:
             
             if result['type'] == 'direct':
                 print(f"[DEBUG] {attempt_name}: DIRECT results - {len(result['entries'])} entries")
-                matches_found = self._process_log_entries(result['entries'], search_term, blocked_urls, attempt_name)
+                matches_found = self._process_log_entries(result['entries'], search_terms, blocked_urls, attempt_name)
                 if matches_found > 0:
                     attempt.success = True
                     print(f"[DEBUG] {attempt_name}: Direct query successful - {matches_found} matches")
@@ -183,7 +223,7 @@ class SearchService:
                     print(f"[DEBUG] {attempt_name}: Job successful - {len(logs)} entries")
                     
                     if len(logs) > 0:
-                        matches_found = self._process_log_entries(logs, search_term, blocked_urls, f"{attempt_name} Job")
+                        matches_found = self._process_log_entries(logs, search_terms, blocked_urls, f"{attempt_name} Job")
                         if matches_found > 0:
                             attempt.success = True
                             print(f"[DEBUG] {attempt_name}: Job successful - {matches_found} matches")
@@ -201,11 +241,14 @@ class SearchService:
         
         return attempt
     
-    def _process_log_entries(self, logs, search_term: str, blocked_urls: Set[str], test_name: str) -> int:
+    def _process_log_entries(self, logs, search_terms: str, blocked_urls: Set[str], test_name: str) -> int:
         """Process log entries and extract matching URLs"""
         matches_found = 0
         
-        print(f"[DEBUG] {test_name}: Processing {len(logs)} entries for '{search_term}'")
+        print(f"[DEBUG] {test_name}: Processing {len(logs)} entries for search terms")
+        
+        # Parse search terms for matching
+        parsed_terms = self._parse_search_terms(search_terms)
         
         # Track what we find for debugging
         action_counts = {}
@@ -232,13 +275,14 @@ class SearchService:
                 if j == 0:
                     print(f"[DEBUG] {test_name} sample entry: url={url_text[:50] if url_text else 'None'}..., action={action_text}")
                 
-                # EXACT MATCHING: Only add URLs that were actually found
-                if url_text and search_term.lower() in url_text.lower():
-                    found_domain = self._extract_exact_domain(url_text, search_term)
+                # MULTI-TERM MATCHING: Check if URL contains any of the search terms
+                if url_text and self._url_contains_any_term(url_text, parsed_terms):
+                    found_domain = self._extract_exact_domain(url_text, parsed_terms)
                     
                     if found_domain and len(found_domain) > config.MIN_DOMAIN_LENGTH:
-                        if matches_found < 5:  # Limit debug output
-                            print(f"[DEBUG] {test_name} EXACT MATCH: {found_domain} (from: {url_text[:40]}..., action: {action_text})")
+                        if matches_found < 10:  # Limit debug output
+                            matching_term = self._get_matching_term(url_text, parsed_terms)
+                            print(f"[DEBUG] {test_name} MATCH: {found_domain} (from: {url_text[:40]}..., matched: '{matching_term}', action: {action_text})")
                         blocked_urls.add(found_domain)
                         matches_found += 1
                         
@@ -255,7 +299,20 @@ class SearchService:
         print(f"[DEBUG] {test_name} RESULT: {matches_found} matches found from {len(logs)} entries")
         return matches_found
     
-    def _extract_exact_domain(self, url_text: str, search_term: str) -> str:
+    def _url_contains_any_term(self, url_text: str, search_terms: List[str]) -> bool:
+        """Check if URL contains any of the search terms"""
+        url_lower = url_text.lower()
+        return any(term.lower() in url_lower for term in search_terms)
+    
+    def _get_matching_term(self, url_text: str, search_terms: List[str]) -> str:
+        """Get the first matching search term for debugging"""
+        url_lower = url_text.lower()
+        for term in search_terms:
+            if term.lower() in url_lower:
+                return term
+        return "unknown"
+    
+    def _extract_exact_domain(self, url_text: str, search_terms: List[str]) -> str:
         """Extract exact domain from URL text - no artificial variations"""
         try:
             # Method 1: Direct URL processing - extract EXACT domain from URL
@@ -266,7 +323,7 @@ class SearchService:
             
             # Extract the EXACT domain part (before first slash, colon, or question mark)
             exact_domain = clean_url.split('/')[0].split(':')[0].split('?')[0].split('&')[0].strip().lower()
-            if exact_domain and '.' in exact_domain and search_term.lower() in exact_domain:
+            if exact_domain and '.' in exact_domain and self._url_contains_any_term(exact_domain, search_terms):
                 return exact_domain
             
             # Method 2: Handle multiple URLs in one field
@@ -275,7 +332,7 @@ class SearchService:
                     parts = url_text.split(separator)
                     for part in parts:
                         part = part.strip()
-                        if part and search_term.lower() in part.lower():
+                        if part and self._url_contains_any_term(part, search_terms):
                             # Process this part
                             if '://' in part:
                                 part = part.split('://', 1)[1]
@@ -289,3 +346,72 @@ class SearchService:
         except Exception as e:
             print(f"[DEBUG] Error extracting domain from {url_text[:50]}...: {e}")
             return None
+    
+    def validate_manual_urls(self, manual_urls: str) -> tuple[List[str], List[str]]:
+        """
+        Validate manually entered URLs
+        
+        Args:
+            manual_urls: Comma-separated or newline-separated URLs
+            
+        Returns:
+            Tuple of (valid_urls, invalid_urls)
+        """
+        if not manual_urls:
+            return [], []
+        
+        # Split by comma or newline
+        raw_urls = re.split(r'[,\n]', manual_urls)
+        
+        valid_urls = []
+        invalid_urls = []
+        
+        for url in raw_urls:
+            cleaned_url = url.strip()
+            if not cleaned_url:
+                continue
+                
+            # Basic validation
+            if self._is_valid_manual_url(cleaned_url):
+                # Normalize the URL (remove protocol, ensure it ends with /)
+                normalized_url = self._normalize_manual_url(cleaned_url)
+                valid_urls.append(normalized_url)
+            else:
+                invalid_urls.append(cleaned_url)
+        
+        return valid_urls, invalid_urls
+    
+    def _is_valid_manual_url(self, url: str) -> bool:
+        """Check if manually entered URL is valid"""
+        if len(url) < config.MIN_DOMAIN_LENGTH or len(url) > config.MAX_URL_LENGTH:
+            return False
+        
+        # Remove protocol for validation
+        clean_url = url
+        if clean_url.startswith(('http://', 'https://')):
+            clean_url = clean_url.split('://', 1)[1]
+        
+        # Allow wildcards at the beginning
+        if clean_url.startswith('*.'):
+            clean_url = clean_url[2:]
+        
+        # Basic domain pattern
+        domain_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*(/.*)?$'
+        
+        return re.match(domain_pattern, clean_url) is not None
+    
+    def _normalize_manual_url(self, url: str) -> str:
+        """Normalize manually entered URL"""
+        # Remove protocol
+        if url.startswith(('http://', 'https://')):
+            url = url.split('://', 1)[1]
+        
+        # Handle wildcards
+        if url.startswith('*.'):
+            return url.lower()
+        
+        # Ensure non-wildcard domains end with /
+        if not url.endswith('/') and '/' not in url:
+            url += '/'
+        
+        return url.lower()

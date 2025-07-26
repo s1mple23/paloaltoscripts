@@ -1,5 +1,6 @@
 """
-Flask routes for the web interface
+Enhanced Flask routes for the web interface
+Supports multiple search terms and manual URL validation
 """
 from flask import Flask, render_template_string, request, session, redirect, url_for, flash, jsonify
 from datetime import datetime
@@ -83,7 +84,7 @@ def register_routes(app: Flask):
         
         try:
             data = request.get_json()
-            search_term = data.get('search_term', '').strip()
+            search_terms = data.get('search_term', '').strip()  # Now supports multiple terms
             action_type = data.get('action_type', 'block-url')
             
             # Initialize services
@@ -99,40 +100,101 @@ def register_routes(app: Flask):
                     'error': f"API connectivity failed: {connectivity['error']}"
                 })
             
-            # Execute search
-            search_result = search_service.search_blocked_urls(search_term, action_type)
+            # Execute enhanced search with multiple terms support
+            search_result = search_service.search_blocked_urls(search_terms, action_type)
+            
+            # Parse terms for logging
+            parsed_terms = search_terms.split(',') if ',' in search_terms else [search_terms]
+            terms_count = len([t.strip() for t in parsed_terms if t.strip()])
             
             # Log search operation
             logging_service.log_search_operation(
-                search_term, action_type, session['username'], 
+                search_terms, action_type, session['username'], 
                 session['hostname'], len(search_result.urls), 
                 search_result.success, search_result.error
             )
             
             if search_result.success:
+                # Enhanced debug info
+                strategy_info = search_result.strategy_info
+                debug_info = f"Multi-term search on {session['hostname']}: {terms_count} terms, " \
+                           f"{strategy_info.get('search_strategy', 'unknown')} strategy, " \
+                           f"found {len(search_result.urls)} matching domains"
+                
                 return jsonify({
                     'success': True,
                     'urls': search_result.urls,
                     'count': len(search_result.urls),
                     'search_term': search_result.search_term,
                     'action_type': search_result.action_type,
-                    'debug_info': f"Searched firewall {session['hostname']} with targeted strategy (action: {action_type}) and found {len(search_result.urls)} matching domains"
+                    'strategy_info': strategy_info,
+                    'debug_info': debug_info
                 })
             else:
                 # Provide helpful error messages
                 error_msg = search_result.error
                 if "timeout" in error_msg.lower():
-                    error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with a more specific search term."
+                    error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
                 elif "connection" in error_msg.lower():
                     error_msg = "Could not connect to the firewall. Please check your connection and try again."
                 elif "unauthorized" in error_msg.lower() or "authentication" in error_msg.lower():
                     error_msg = "Authentication expired. Please log in again."
+                elif "no valid search terms" in error_msg.lower():
+                    error_msg = "Please provide valid search terms. Use comma-separated values for multiple terms."
                 
                 return jsonify({'success': False, 'error': error_msg})
             
         except Exception as e:
-            logging_service.log_error(f"Search URLs failed for {session.get('username', 'unknown')}@{session.get('hostname', 'unknown')}", e)
+            logging_service.log_error(f"Enhanced search URLs failed for {session.get('username', 'unknown')}@{session.get('hostname', 'unknown')}", e)
             return jsonify({'success': False, 'error': f"Search failed: {str(e)}"})
+
+    @app.route('/validate_manual_urls', methods=['POST'])
+    def validate_manual_urls():
+        """Validate manually entered URLs"""
+        if 'api_key' not in session:
+            return jsonify({'success': False, 'error': 'Not authenticated'})
+        
+        try:
+            data = request.get_json()
+            manual_urls = data.get('manual_urls', '').strip()
+            
+            if not manual_urls:
+                return jsonify({
+                    'success': True,
+                    'valid_urls': [],
+                    'invalid_urls': []
+                })
+            
+            # Initialize services
+            api_client = PaloAltoAPI(session['hostname'], session['username'], '')
+            api_client.api_key = session['api_key']
+            search_service = SearchService(api_client)
+            
+            # Validate URLs
+            valid_urls, invalid_urls = search_service.validate_manual_urls(manual_urls)
+            
+            # Log validation attempt
+            logging_service.log_info(
+                f"Manual URL validation by {session['username']}@{session['hostname']}: "
+                f"{len(valid_urls)} valid, {len(invalid_urls)} invalid",
+                {
+                    'valid_count': len(valid_urls),
+                    'invalid_count': len(invalid_urls),
+                    'valid_urls': valid_urls,
+                    'invalid_urls': invalid_urls
+                }
+            )
+            
+            return jsonify({
+                'success': True,
+                'valid_urls': valid_urls,
+                'invalid_urls': invalid_urls,
+                'total_input': len(valid_urls) + len(invalid_urls)
+            })
+            
+        except Exception as e:
+            logging_service.log_error("Manual URL validation failed", e)
+            return jsonify({'success': False, 'error': f"Validation failed: {str(e)}"})
 
     @app.route('/get_categories')
     def get_categories():
@@ -207,13 +269,27 @@ def register_routes(app: Flask):
                 # Log operation
                 logging_service.log_whitelist_operation(ticket_data)
                 
+                # Enhanced logging for multi-URL submissions
+                url_count = len(whitelist_request.urls)
+                logging_service.log_info(
+                    f"Enhanced whitelist submission completed: {url_count} URLs added to {whitelist_request.category}",
+                    {
+                        'ticket_id': ticket_id,
+                        'url_count': url_count,
+                        'category': whitelist_request.category,
+                        'action_type': whitelist_request.action_type,
+                        'commit_job_id': commit_data.get('commit_job_id')
+                    }
+                )
+                
                 # Prepare response
                 response_data = {
                     'success': True,
                     'message': message,
                     'commit_job_id': commit_data.get('commit_job_id'),
                     'log_entry': str(ticket_data.to_dict()),
-                    'auto_commit_status': commit_data.get('auto_commit_status', {})
+                    'auto_commit_status': commit_data.get('auto_commit_status', {}),
+                    'url_count': url_count
                 }
                 
                 if ticket_log_file:
@@ -224,7 +300,7 @@ def register_routes(app: Flask):
                 return jsonify({'success': False, 'error': message})
                 
         except Exception as e:
-            logging_service.log_error("Whitelist submission failed", e)
+            logging_service.log_error("Enhanced whitelist submission failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
     @app.route('/commit_status', methods=['POST'])
@@ -276,7 +352,12 @@ def register_routes(app: Flask):
                 'connectivity': connectivity,
                 'log_types': log_types,
                 'hostname': session['hostname'],
-                'username': session['username']
+                'username': session['username'],
+                'enhanced_features': {
+                    'multi_term_search': True,
+                    'manual_url_input': True,
+                    'or_logic_support': True
+                }
             })
             
         except Exception as e:

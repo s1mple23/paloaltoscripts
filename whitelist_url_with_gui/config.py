@@ -1,16 +1,17 @@
 """
-Configuration settings for Palo Alto Whitelist Tool
+Enhanced Configuration settings for Palo Alto Whitelist Tool
+Now supports multi-URL search and manual input features
 """
 import os
 from datetime import timedelta
 
 class Config:
-    """Application configuration"""
+    """Enhanced application configuration"""
     
     # Application Info
     APP_NAME = "Palo Alto Firewall URL Whitelisting Tool"
-    VERSION = "1.3.0"
-    DESCRIPTION = "Targeted Single Strategy Search"
+    VERSION = "1.4.0"
+    DESCRIPTION = "Enhanced Multi-URL Search with Manual Input"
     
     # Flask Configuration
     SECRET_KEY = os.urandom(24)
@@ -31,21 +32,32 @@ class Config:
     LOG_LEVEL = 'INFO'
     LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
     
-    # Search Configuration
+    # Enhanced Search Configuration
     DEFAULT_MAX_RESULTS = 3000
     LOOKBACK_MONTHS = 3
     SEARCH_TIMEOUT_ATTEMPTS = [10, 15, 25, 35]  # seconds
     ATTEMPT_WAIT_TIME = 3  # seconds between attempts
+    
+    # Multi-URL Search Configuration
+    MAX_SEARCH_TERMS = 10  # Maximum number of search terms allowed
+    SEARCH_TERM_SEPARATOR = ','  # Separator for multiple search terms
+    MIN_SEARCH_TERM_LENGTH_MULTI = 2  # Minimum length for each term in multi-search
+    
+    # Manual URL Configuration
+    MAX_MANUAL_URLS = 50  # Maximum number of manually entered URLs
+    MANUAL_URL_SEPARATORS = [',', '\n', '\r\n']  # Separators for manual URL input
+    ALLOW_WILDCARD_MANUAL = True  # Allow wildcard domains in manual input
     
     # Commit Configuration
     COMMIT_MAX_POLLS = 10
     COMMIT_POLL_INTERVAL = 6  # seconds
     COMMIT_TIMEOUT = 60  # seconds
     
-    # URL Validation
+    # Enhanced URL Validation
     MIN_SEARCH_TERM_LENGTH = 2
     MIN_DOMAIN_LENGTH = 3
     MAX_URL_LENGTH = 500
+    MAX_MANUAL_URL_LENGTH = 200  # Specific limit for manually entered URLs
     
     # API Configuration
     API_TIMEOUT = 30  # seconds
@@ -60,16 +72,35 @@ class Config:
     
     # URL Separators (for splitting multiple URLs in one field)
     URL_SEPARATORS = [' ', '\t', '\n', '&r=', '&gdpr_consent=', '?r=']
+    
+    # Enhanced Query Building
+    USE_OR_LOGIC_FOR_MULTI_TERMS = True  # Use OR logic for multiple search terms
+    QUERY_OPTIMIZATION = True  # Enable query optimization for better performance
+    
+    # Manual URL Validation Patterns
+    MANUAL_URL_VALIDATION = {
+        'allow_protocols': ['http://', 'https://'],
+        'allow_wildcards': ['*.'],
+        'forbidden_chars': ['<', '>', '"', "'", '&', ';'],
+        'required_tld': True,  # Require valid TLD for domains
+        'min_dots': 1  # Minimum number of dots in domain
+    }
 
 class DevelopmentConfig(Config):
     """Development configuration"""
     DEBUG = True
     LOG_LEVEL = 'DEBUG'
+    # Allow more lenient validation in development
+    MAX_SEARCH_TERMS = 15
+    MAX_MANUAL_URLS = 100
 
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
     LOG_LEVEL = 'INFO'
+    # Stricter limits in production
+    MAX_SEARCH_TERMS = 8
+    MAX_MANUAL_URLS = 30
 
 # Default configuration
 config = Config()
