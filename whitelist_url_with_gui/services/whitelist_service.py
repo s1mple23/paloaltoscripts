@@ -77,9 +77,12 @@ class WhitelistService:
             # Start commit
             commit_success, job_id = self.api_client.commit_changes()
             if not commit_success:
+                commit_data['auto_commit_status']['status'] = 'FAILED'
+                commit_data['auto_commit_status']['error'] = 'Failed to start commit'
                 return commit_data
             
             commit_data['commit_job_id'] = job_id
+            print(f"[DEBUG] Commit job {job_id} started successfully")
             
             # Auto-poll commit status
             status_result = self._poll_commit_status(job_id)
@@ -98,75 +101,115 @@ class WhitelistService:
         
         commit_status = None
         commit_progress = None
+        polling_attempts = 0
+        
+        # Wait a bit before first poll to let the job initialize
+        print(f"[DEBUG] Waiting 3 seconds for job {job_id} to initialize...")
+        time.sleep(3)
         
         for poll_count in range(config.COMMIT_MAX_POLLS):
-            time.sleep(config.COMMIT_POLL_INTERVAL)
+            polling_attempts += 1
             
             try:
+                print(f"[DEBUG] Polling attempt {polling_attempts}: Getting status for job {job_id}")
                 status_result = self.api_client.get_commit_status(job_id)
+                
                 commit_status = status_result.get('status', 'Unknown')
                 commit_progress = status_result.get('progress', '0')
                 
-                print(f"[DEBUG] Auto-poll {poll_count + 1}/{config.COMMIT_MAX_POLLS}: Status={commit_status}, Progress={commit_progress}%")
+                print(f"[DEBUG] Auto-poll {poll_count + 1}/{config.COMMIT_MAX_POLLS}: Job={job_id}, Status={commit_status}, Progress={commit_progress}%")
                 
-                # If job is completed or failed, stop polling immediately
-                if commit_status in ['FIN', 'FAIL']:
-                    print(f"[DEBUG] Commit job completed with status: {commit_status}")
+                # Handle different status values
+                if commit_status == 'FIN':
+                    print(f"[DEBUG] ✅ Commit job {job_id} COMPLETED successfully!")
                     break
-                    
-                # If progress is 100%, give it one more quick check and exit
-                if commit_progress == '100':
-                    print(f"[DEBUG] Commit at 100%, doing final check...")
+                elif commit_status == 'FAIL':
+                    print(f"[DEBUG] ❌ Commit job {job_id} FAILED")
+                    break
+                elif commit_status in ['ACT', 'PEND', 'QUEUED']:
+                    print(f"[DEBUG] ⏳ Commit job {job_id} is {commit_status} - continuing to poll")
+                elif commit_status == 'Unknown':
+                    print(f"[DEBUG] ⚠️ Commit job {job_id} status unknown - may still be processing")
+                else:
+                    print(f"[DEBUG] ℹ️ Commit job {job_id} has status: {commit_status}")
+                
+                # Check if progress indicates completion even if status isn't FIN yet
+                if commit_progress == '100' and commit_status not in ['FIN', 'FAIL']:
+                    print(f"[DEBUG] Progress is 100% but status is {commit_status} - waiting for final status...")
+                    # Give it a bit more time to update to FIN
                     time.sleep(3)
-                    try:
-                        final_status = self.api_client.get_commit_status(job_id)
-                        commit_status = final_status.get('status', commit_status)
-                        print(f"[DEBUG] Final status check: {commit_status}")
-                    except:
-                        pass  # Don't fail if final check fails
-                    break
                     
-                # After 5 polls (30 seconds), check less frequently
+                    # One more check
+                    try:
+                        final_check = self.api_client.get_commit_status(job_id)
+                        final_status = final_check.get('status', commit_status)
+                        print(f"[DEBUG] Final status check: {final_status}")
+                        if final_status == 'FIN':
+                            commit_status = final_status
+                            break
+                    except:
+                        print(f"[DEBUG] Final status check failed, keeping current status")
+                
+                # If we've been polling for a while and no completion, check less frequently
                 if poll_count >= 5:
-                    print(f"[DEBUG] Switching to background mode after 30 seconds")
-                    break  # Let user check manually if needed
+                    print(f"[DEBUG] Been polling for {(poll_count + 1) * config.COMMIT_POLL_INTERVAL} seconds...")
+                    if poll_count >= 8:  # After ~50 seconds, reduce frequency
+                        print(f"[DEBUG] Reducing polling frequency after {(poll_count + 1) * config.COMMIT_POLL_INTERVAL} seconds")
+                        time.sleep(config.COMMIT_POLL_INTERVAL * 2)  # Wait longer between polls
+                    else:
+                        time.sleep(config.COMMIT_POLL_INTERVAL)
+                else:
+                    time.sleep(config.COMMIT_POLL_INTERVAL)
                     
             except Exception as e:
-                print(f"[DEBUG] Error during auto-polling: {e}")
+                print(f"[DEBUG] Error during auto-polling attempt {polling_attempts}: {e}")
+                # Continue trying other polls even if one fails
+                time.sleep(config.COMMIT_POLL_INTERVAL)
                 continue
         
-        # Always provide a status, even if polling incomplete
+        # Final status determination
         if commit_status is None:
+            print(f"[DEBUG] ⚠️ Auto-polling completed but no status received - job may still be processing")
             commit_status = 'IN_PROGRESS'
             commit_progress = 'Unknown'
-            print(f"[DEBUG] Auto-polling completed with partial status")
         else:
-            print(f"[DEBUG] Auto-polling finished with final status: {commit_status}")
+            print(f"[DEBUG] ✅ Auto-polling finished. Final status: {commit_status}, Progress: {commit_progress}%")
+        
+        # Determine if polling was truly completed
+        polling_completed = commit_status in ['FIN', 'FAIL']
         
         return {
             'commit_status': commit_status,
             'commit_progress': commit_progress,
             'auto_commit_status': {
-                'status': commit_status or 'SUBMITTED',
-                'progress': commit_progress or '0',
+                'status': commit_status,
+                'progress': commit_progress,
                 'auto_polled': True,
-                'polling_completed': commit_status in ['FIN', 'FAIL'] if commit_status else False
+                'polling_completed': polling_completed,
+                'polling_attempts': polling_attempts
             }
         }
     
     def get_commit_status(self, job_id: str) -> CommitStatus:
         """Get current commit status"""
         try:
+            print(f"[DEBUG] Manual status check for job {job_id}")
             status_result = self.api_client.get_commit_status(job_id)
+            
+            status = status_result.get('status', 'Unknown')
+            progress = status_result.get('progress', '0')
+            
+            print(f"[DEBUG] Manual status check result: Status={status}, Progress={progress}%")
             
             return CommitStatus(
                 job_id=job_id,
-                status=status_result.get('status', 'Unknown'),
-                progress=status_result.get('progress', '0'),
+                status=status,
+                progress=progress,
                 error=status_result.get('error')
             )
             
         except Exception as e:
+            print(f"[DEBUG] Manual status check failed for job {job_id}: {e}")
             return CommitStatus(
                 job_id=job_id,
                 status='Error',
