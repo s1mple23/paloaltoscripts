@@ -1,6 +1,7 @@
 """
 Enhanced HTML Templates for the web interface
 Complete file with embedded JavaScript and proper function exports
+Added ticket download functionality and optional ticket ID
 """
 from config import config
 
@@ -53,7 +54,7 @@ LOGIN_TEMPLATE = '''
         
         <div class="info">
             Enter your firewall credentials to begin URL whitelisting management<br>
-            <small>Version {{ config.VERSION }} - Enhanced Multi-URL Search with Manual Input</small>
+            <small>Version {{ config.VERSION }} - Enhanced Multi-URL Search with Manual Input & Ticket Download</small>
         </div>
     </div>
 </body>
@@ -83,6 +84,8 @@ DASHBOARD_TEMPLATE = '''
         .btn-secondary:hover { background: #545b62; }
         .btn-success { background: #28a745; }
         .btn-success:hover { background: #1e7e34; }
+        .btn-download { background: #17a2b8; }
+        .btn-download:hover { background: #138496; }
         .url-list { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9; }
         .url-item { display: flex; align-items: center; margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white; }
         .url-item:hover { background: #f8f9fa; }
@@ -110,12 +113,15 @@ DASHBOARD_TEMPLATE = '''
         .validation-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .validation-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .validation-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .ticket-input-info { background: #e8f4fd; padding: 12px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #2196f3; }
+        .download-section { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-top: 15px; border: 2px solid #17a2b8; }
+        .download-section h3 { color: #17a2b8; margin-top: 0; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🔒 Enhanced URL Whitelisting Dashboard</h1>
-        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Multi-URL Search + Manual Input</div>
+        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Multi-URL Search + Manual Input + Ticket Download</div>
         <a href="{{ url_for('logout') }}" class="btn btn-secondary logout">Logout</a>
     </div>
 
@@ -213,9 +219,19 @@ DASHBOARD_TEMPLATE = '''
     <div class="section step" id="step4">
         <h2><span class="step-number">4</span>Change Ticket & Submit</h2>
         
+        <div class="ticket-input-info">
+            📋 <strong>Ticket ID Information:</strong><br>
+            • <strong>Optional:</strong> Leave empty to auto-generate a ticket ID<br>
+            • <strong>Auto-Format:</strong> Ticket-27JUL2025-14-30-45 (current date and time)<br>
+            • <strong>Custom:</strong> Enter your own change/ticket ID if needed
+        </div>
+        
         <div class="form-group">
-            <label for="ticketId">Change/Ticket ID:</label>
-            <input type="text" id="ticketId" name="ticketId" required placeholder="e.g., CHG-2024-001234">
+            <label for="ticketId">Change/Ticket ID (Optional - auto-generated if empty):</label>
+            <input type="text" id="ticketId" name="ticketId" placeholder="Leave empty for auto-generation or enter custom ID (e.g., CHG-2024-001234)">
+            <small style="color: #666; font-size: 12px;">
+                💡 Auto-generated format: Ticket-27JUL2025-14-30-45 (current date/time)
+            </small>
         </div>
         
         <div id="finalSummary"></div>
@@ -240,6 +256,7 @@ DASHBOARD_TEMPLATE = '''
         var manualUrls = [];
         var categories = {};
         var selectedActionType = 'block-url';
+        var currentTicketId = null; // Store current ticket ID for download
 
         // Prevent form submission from reloading page
         function handleSearchSubmit(event) {
@@ -681,6 +698,26 @@ DASHBOARD_TEMPLATE = '''
                         html += '<td style="border: 1px solid #ddd; padding: 8px; color: ' + statusColor + ';">' + statusText + '</td></tr>';
                     });
                     html += '</table>';
+                    
+                    // Enhanced features info
+                    if (data.enhanced_features) {
+                        html += '<h4>Enhanced Features:</h4>';
+                        html += '<ul>';
+                        if (data.enhanced_features.multi_term_search) {
+                            html += '<li>✅ Multi-term OR logic search</li>';
+                        }
+                        if (data.enhanced_features.manual_url_input) {
+                            html += '<li>✅ Manual URL input</li>';
+                        }
+                        if (data.enhanced_features.automatic_ticket_generation) {
+                            html += '<li>✅ Automatic ticket ID generation</li>';
+                        }
+                        if (data.enhanced_features.ticket_download) {
+                            html += '<li>✅ Ticket log download</li>';
+                        }
+                        html += '</ul>';
+                    }
+                    
                     html += '</div>';
                     
                     resultsDiv.innerHTML = html;
@@ -793,14 +830,11 @@ DASHBOARD_TEMPLATE = '''
         
         function submitWhitelist() {
             var ticketId = document.getElementById('ticketId').value.trim();
-            if (!ticketId) {
-                alert('Please enter a Change/Ticket ID');
-                return;
-            }
-            
             var categorySelect = document.getElementById('urlCategory');
             var exactMatch = document.getElementById('exactMatch').checked;
             var wildcardMatch = document.getElementById('wildcardMatch').checked;
+            
+            // Note: ticketId is now optional and will be auto-generated if empty
             
             if (!exactMatch && !wildcardMatch) {
                 alert('Please select at least one whitelisting option');
@@ -848,7 +882,7 @@ DASHBOARD_TEMPLATE = '''
             var payload = {
                 category: categorySelect.value,
                 urls: urlsToAdd,
-                ticket_id: ticketId,
+                ticket_id: ticketId, // Can be empty for auto-generation
                 action_type: selectedActionType
             };
             
@@ -886,6 +920,12 @@ DASHBOARD_TEMPLATE = '''
             .then(function(data) {
                 clearTimeout(submissionTimeout);
                 console.log('[DEBUG] Submit response data:', data);
+                
+                // Store ticket ID for download
+                if (data.ticket_id) {
+                    currentTicketId = data.ticket_id;
+                }
+                
                 activateStep(5);
                 displayResults(data);
             })
@@ -916,11 +956,48 @@ DASHBOARD_TEMPLATE = '''
             });
         }
         
+        function downloadTicket(ticketId) {
+            console.log('[DEBUG] Downloading ticket:', ticketId);
+            
+            if (!ticketId) {
+                alert('No ticket ID available for download');
+                return;
+            }
+            
+            // Create download link and trigger download
+            var downloadUrl = '/download_ticket/' + encodeURIComponent(ticketId);
+            
+            // Create temporary link element and click it
+            var link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = 'ticket_' + ticketId + '.log';
+            link.style.display = 'none';
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            console.log('[DEBUG] Download initiated for ticket:', ticketId);
+        }
+        
         function displayResults(data) {
             var resultsDiv = document.getElementById('results');
             
             if (data.success) {
                 var html = '<div class="success">' + data.message + '</div>';
+                
+                // Store ticket ID for download functionality
+                var ticketId = data.ticket_id || currentTicketId;
+                
+                // Add download section if ticket ID available
+                if (ticketId) {
+                    html += '<div class="download-section">';
+                    html += '<h3>📥 Download Ticket Log</h3>';
+                    html += '<p><strong>Ticket ID:</strong> ' + ticketId + '</p>';
+                    html += '<p>Download the complete ticket log file for your records and audit trail.</p>';
+                    html += '<button class="btn btn-download" onclick="downloadTicket(' + "'" + ticketId + "'" + ')">📥 Download Ticket Log</button>';
+                    html += '</div>';
+                }
                 
                 // Show commit status with live updates for immediate responses
                 if (data.commit_job_id) {
@@ -1233,7 +1310,7 @@ DASHBOARD_TEMPLATE = '''
             window.location.reload();
         }
         
-        console.log('[DEBUG] Dashboard script loaded successfully');
+        console.log('[DEBUG] Dashboard script loaded successfully - Enhanced with ticket download and optional ticket ID');
     </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 """
 Logging Service
 Handles ticket logging and audit trail creation
+Enhanced to update ticket logs with final commit status
 """
 import os
 import json
@@ -89,6 +90,66 @@ class LoggingService:
             self.log_error("Failed to create ticket log", e, ticket_data.to_dict())
             return None
     
+    def update_ticket_log_commit_status(self, ticket_log_file: str, commit_status: str, commit_progress: str):
+        """
+        Update existing ticket log file with final commit status
+        
+        Args:
+            ticket_log_file: Path to the ticket log file
+            commit_status: Final commit status (e.g., 'FIN', 'FAIL')
+            commit_progress: Final commit progress (e.g., '100%')
+        """
+        try:
+            if not ticket_log_file or not os.path.exists(ticket_log_file):
+                print(f"[DEBUG] Ticket log file not found for update: {ticket_log_file}")
+                return
+            
+            # Read current content
+            with open(ticket_log_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Find and update the commit status section
+            lines = content.split('\n')
+            updated_lines = []
+            in_operation_status = False
+            status_updated = False
+            progress_updated = False
+            
+            for line in lines:
+                if 'OPERATION STATUS:' in line:
+                    in_operation_status = True
+                    updated_lines.append(line)
+                elif in_operation_status and 'Commit Status:' in line:
+                    updated_lines.append(f"Commit Status:  {commit_status}")
+                    status_updated = True
+                elif in_operation_status and 'Commit Progress:' in line:
+                    updated_lines.append(f"Commit Progress: {commit_progress}")
+                    progress_updated = True
+                elif in_operation_status and line.startswith('SEARCH DETAILS:'):
+                    # End of operation status section
+                    in_operation_status = False
+                    updated_lines.append(line)
+                else:
+                    updated_lines.append(line)
+            
+            # Write updated content back to file
+            updated_content = '\n'.join(updated_lines)
+            with open(ticket_log_file, 'w', encoding='utf-8') as f:
+                f.write(updated_content)
+            
+            print(f"[LOG] Updated ticket log with final commit status: {commit_status}, progress: {commit_progress}")
+            
+            # Log the update
+            self.log_info(f"Ticket log updated with commit status", {
+                'file': ticket_log_file,
+                'status': commit_status,
+                'progress': commit_progress
+            })
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to update ticket log commit status: {e}")
+            self.log_error("Failed to update ticket log commit status", e)
+    
     def _generate_ticket_log_content(self, ticket_data: TicketData) -> str:
         """Generate human-readable ticket log content"""
         
@@ -98,6 +159,14 @@ class LoggingService:
             formatted_time = parsed_time.strftime('%Y-%m-%d - %H:%M:%S')
         except (ValueError, TypeError):
             formatted_time = ticket_data.timestamp or "Unknown"
+        
+        # Determine initial commit status display
+        commit_status_display = ticket_data.commit_status or 'SUBMITTED'
+        commit_progress_display = ticket_data.commit_progress or '0%'
+        
+        # Add progress % if not already included
+        if commit_progress_display and not commit_progress_display.endswith('%'):
+            commit_progress_display += '%'
         
         log_content = f"""
 ================================================================================
@@ -130,12 +199,9 @@ OPERATION STATUS:
 -----------------
 Success:        {'✅ YES' if ticket_data.success else '❌ NO'}
 Commit Job ID:  {ticket_data.commit_job_id or 'N/A'}
+Commit Status:  {commit_status_display}
+Commit Progress: {commit_progress_display}
 """
-        
-        # Add commit status if available
-        if ticket_data.commit_status:
-            log_content += f"Commit Status:  {ticket_data.commit_status}\n"
-            log_content += f"Commit Progress: {ticket_data.commit_progress or 'N/A'}%\n"
         
         log_content += f"""
 SEARCH DETAILS:
@@ -152,6 +218,14 @@ Search Method:  Targeted with Multiple Timeouts
 Log Format:     Human Readable Text
 Created for:    Audit Trail & Compliance
 Tool Version:   {config.APP_NAME} v{config.VERSION}
+Log Updated:    {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+NOTES:
+------
+• This log file may be updated with final commit status once the firewall 
+  configuration commit is completed.
+• Initial status shows submission time. Final status shows completion.
+• For audit purposes, keep this log file as proof of configuration changes.
 
 ================================================================================
                               END OF LOG

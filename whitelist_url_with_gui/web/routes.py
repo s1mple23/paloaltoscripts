@@ -1,11 +1,15 @@
 """
 Enhanced Flask routes for the web interface
 Fixed JSON response issues and improved error handling
+Added ticket download functionality and automatic ticket ID generation
+Enhanced with live ticket log updates for commit status
 """
-from flask import Flask, render_template_string, request, session, redirect, url_for, flash, jsonify
+from flask import Flask, render_template_string, request, session, redirect, url_for, flash, jsonify, send_file
 from datetime import datetime
 import traceback
 import json
+import os
+import tempfile
 
 from config import config
 from api.palo_alto_client import PaloAltoAPI, PaloAltoAPIError
@@ -18,6 +22,17 @@ from web.templates import get_login_template, get_dashboard_template
 
 # Initialize services
 logging_service = LoggingService()
+
+def generate_automatic_ticket_id():
+    """
+    Generate automatic ticket ID with current date and time
+    Format: Ticket-27JUL2025-01-06-10 (DD MMM YYYY - HH-MM-SS)
+    """
+    now = datetime.now()
+    # Format: 27JUL2025-14-30-45
+    date_part = now.strftime("%d%b%Y").upper()
+    time_part = now.strftime("%H-%M-%S")
+    return f"Ticket-{date_part}-{time_part}"
 
 def register_routes(app: Flask):
     """Register all Flask routes"""
@@ -296,9 +311,14 @@ def register_routes(app: Flask):
             urls = data.get('urls', [])
             action_type = data.get('action_type', 'block-url')
             
+            # Generate automatic ticket ID if none provided
+            if not ticket_id:
+                ticket_id = generate_automatic_ticket_id()
+                print(f"[DEBUG] Generated automatic ticket ID: {ticket_id}")
+            
             print(f"[DEBUG] Whitelist submission data: ticket_id='{ticket_id}', category='{category}', urls_count={len(urls)}, action_type='{action_type}'")
             
-            # Validate ticket ID
+            # Validate ticket ID (now optional with auto-generation)
             if not validate_ticket_id(ticket_id):
                 return jsonify({'success': False, 'error': 'Invalid ticket ID format. Please use alphanumeric characters, hyphens, underscores, and dots only.'})
             
@@ -341,7 +361,7 @@ def register_routes(app: Flask):
             success, message, commit_data = whitelist_service.submit_whitelist_request(whitelist_request)
             
             if success:
-                # Create ticket data for logging
+                # Create ticket data for logging - with INITIAL status
                 ticket_data = TicketData(
                     ticket_id=whitelist_request.ticket_id,
                     username=session['username'],
@@ -351,13 +371,18 @@ def register_routes(app: Flask):
                     urls_added=whitelist_request.urls,
                     success=True,
                     commit_job_id=commit_data.get('commit_job_id'),
-                    commit_status=commit_data.get('commit_status'),
-                    commit_progress=commit_data.get('commit_progress'),
+                    commit_status='SUBMITTED',  # Initial status
+                    commit_progress='0',         # Initial progress
                     action_type=whitelist_request.action_type
                 )
                 
-                # Create ticket log
+                # Create ticket log with initial status
                 ticket_log_file = logging_service.create_ticket_log(ticket_data)
+                
+                # Store ticket log file path in session for later updates
+                if ticket_log_file:
+                    session['last_ticket_log'] = ticket_log_file
+                    session['last_ticket_id'] = ticket_id
                 
                 # Log operation
                 logging_service.log_whitelist_operation(ticket_data)
@@ -371,7 +396,8 @@ def register_routes(app: Flask):
                         'url_count': url_count,
                         'category': whitelist_request.category,
                         'action_type': whitelist_request.action_type,
-                        'commit_job_id': commit_data.get('commit_job_id')
+                        'commit_job_id': commit_data.get('commit_job_id'),
+                        'ticket_log_file': ticket_log_file
                     }
                 )
                 
@@ -382,7 +408,8 @@ def register_routes(app: Flask):
                     'commit_job_id': commit_data.get('commit_job_id'),
                     'log_entry': str(ticket_data.to_dict()),
                     'auto_commit_status': commit_data.get('auto_commit_status', {}),
-                    'url_count': url_count
+                    'url_count': url_count,
+                    'ticket_id': ticket_id  # Include ticket ID in response
                 }
                 
                 if ticket_log_file:
@@ -409,6 +436,82 @@ def register_routes(app: Flask):
             logging_service.log_error("Enhanced whitelist submission failed", e)
             return jsonify({'success': False, 'error': error_message})
 
+    @app.route('/download_ticket/<ticket_id>')
+    def download_ticket(ticket_id):
+        """Download ticket log file"""
+        if 'api_key' not in session:
+            return redirect(url_for('login'))
+        
+        try:
+            # Find the most recent ticket log file for this ticket ID
+            log_files = []
+            
+            # Check if we have the file path in session
+            if 'last_ticket_log' in session:
+                ticket_file = session['last_ticket_log']
+                if os.path.exists(ticket_file) and ticket_id in ticket_file:
+                    return send_file(
+                        ticket_file,
+                        as_attachment=True,
+                        download_name=f"ticket_{ticket_id}.log",
+                        mimetype='text/plain'
+                    )
+            
+            # Search for ticket log files in log directory
+            import glob
+            pattern = os.path.join(config.LOG_DIR, f"ticket_{ticket_id}_*.log")
+            log_files = glob.glob(pattern)
+            
+            if log_files:
+                # Get the most recent file
+                latest_file = max(log_files, key=os.path.getctime)
+                
+                return send_file(
+                    latest_file,
+                    as_attachment=True,
+                    download_name=f"ticket_{ticket_id}.log",
+                    mimetype='text/plain'
+                )
+            else:
+                # Create a temporary file with basic info if log not found
+                temp_content = f"""
+================================================================================
+                    PALO ALTO URL WHITELISTING - TICKET LOG
+================================================================================
+
+TICKET INFORMATION:
+-------------------
+Ticket ID:      {ticket_id}
+Date & Time:    {datetime.now().strftime('%Y-%m-%d - %H:%M:%S')}
+Processed by:   {session.get('username', 'Unknown')}
+Firewall:       {session.get('hostname', 'Unknown')}
+
+STATUS:
+-------
+Note: Original ticket log file not found.
+This is a basic ticket information file.
+
+================================================================================
+                              END OF LOG
+================================================================================
+"""
+                
+                # Create temporary file
+                temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.log', delete=False)
+                temp_file.write(temp_content)
+                temp_file.close()
+                
+                return send_file(
+                    temp_file.name,
+                    as_attachment=True,
+                    download_name=f"ticket_{ticket_id}_basic.log",
+                    mimetype='text/plain'
+                )
+                
+        except Exception as e:
+            print(f"[DEBUG] Download ticket error: {e}")
+            return jsonify({'success': False, 'error': f'Download failed: {str(e)}'})
+
     @app.route('/commit_status', methods=['POST'])
     def commit_status():
         if 'api_key' not in session:
@@ -434,6 +537,18 @@ def register_routes(app: Flask):
             
             status = whitelist_service.get_commit_status(job_id)
             
+            # Update ticket log if we have one in session and status is final
+            if status.status in ['FIN', 'FAIL'] and 'last_ticket_log' in session:
+                ticket_log_file = session['last_ticket_log']
+                progress = status.progress if status.progress.endswith('%') else f"{status.progress}%"
+                
+                print(f"[DEBUG] Updating ticket log with final status: {status.status}, progress: {progress}")
+                logging_service.update_ticket_log_commit_status(
+                    ticket_log_file, 
+                    status.status, 
+                    progress
+                )
+            
             return jsonify({
                 'success': True,
                 'status': status.to_dict()
@@ -442,6 +557,55 @@ def register_routes(app: Flask):
         except Exception as e:
             print(f"[DEBUG] Commit status check error: {e}")
             logging_service.log_error("Commit status check failed", e)
+            return jsonify({'success': False, 'error': str(e)})
+
+    @app.route('/update_ticket_commit_status', methods=['POST'])
+    def update_ticket_commit_status():
+        """Update ticket log with final commit status - called from frontend"""
+        if 'api_key' not in session:
+            return jsonify({'success': False, 'error': 'Not authenticated'})
+        
+        try:
+            if not request.is_json:
+                return jsonify({'success': False, 'error': 'Invalid request format. Expected JSON.'})
+                
+            data = request.get_json()
+            if data is None:
+                return jsonify({'success': False, 'error': 'No JSON data received'})
+                
+            commit_status = data.get('commit_status')
+            commit_progress = data.get('commit_progress', '0')
+            
+            if not commit_status:
+                return jsonify({'success': False, 'error': 'Commit status required'})
+            
+            # Get ticket log file from session
+            if 'last_ticket_log' not in session:
+                return jsonify({'success': False, 'error': 'No ticket log file found in session'})
+            
+            ticket_log_file = session['last_ticket_log']
+            
+            # Ensure progress has % symbol
+            if not commit_progress.endswith('%'):
+                commit_progress = f"{commit_progress}%"
+            
+            print(f"[DEBUG] Manual update of ticket log: status={commit_status}, progress={commit_progress}")
+            
+            # Update the ticket log
+            logging_service.update_ticket_log_commit_status(
+                ticket_log_file, 
+                commit_status, 
+                commit_progress
+            )
+            
+            return jsonify({
+                'success': True,
+                'message': f'Ticket log updated with status: {commit_status}'
+            })
+            
+        except Exception as e:
+            print(f"[DEBUG] Update ticket commit status error: {e}")
+            logging_service.log_error("Update ticket commit status failed", e)
             return jsonify({'success': False, 'error': str(e)})
 
     @app.route('/debug_logs')
@@ -469,7 +633,10 @@ def register_routes(app: Flask):
                 'enhanced_features': {
                     'multi_term_search': True,
                     'manual_url_input': True,
-                    'or_logic_support': True
+                    'or_logic_support': True,
+                    'automatic_ticket_generation': True,
+                    'ticket_download': True,
+                    'live_commit_status_updates': True
                 }
             })
             
