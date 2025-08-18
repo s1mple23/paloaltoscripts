@@ -1,6 +1,7 @@
 """
 Production Configuration for Ubuntu Server
 Enhanced logging and output handling
+Updated to support automatic dual-action search
 """
 import os
 from datetime import timedelta
@@ -10,8 +11,8 @@ class ServerConfig:
     
     # Application Info
     APP_NAME = "Palo Alto Firewall URL Whitelisting Tool"
-    VERSION = "1.5.0-server"
-    DESCRIPTION = "Enhanced Multi-URL Search with Server Support"
+    VERSION = "1.6.0-server"
+    DESCRIPTION = "Automatic Dual-Action Search with Category Display and Conditional Download"
     
     # Flask Configuration
     SECRET_KEY = os.urandom(24)
@@ -70,8 +71,9 @@ class ServerConfig:
     JOB_CHECK_INTERVAL = 3  # More conservative
     STATUS_CHECK_TIMEOUT = 15
     
-    # Valid Actions
+    # Valid Actions - Extended to support automatic dual search
     VALID_ACTIONS = ['block-url', 'block-continue']
+    EXTENDED_VALID_ACTIONS = ['block-url', 'block-continue', 'both']  # 'both' for automatic dual search
     
     # URL Sources
     URL_SOURCES = ['misc', 'url', 'src-location', 'dst-location', 'hostname', 'host']
@@ -82,6 +84,10 @@ class ServerConfig:
     # Query Building
     USE_OR_LOGIC_FOR_MULTI_TERMS = True
     QUERY_OPTIMIZATION = True
+    
+    # Automatic Dual Search Configuration
+    ENABLE_AUTOMATIC_DUAL_SEARCH = True
+    DUAL_SEARCH_ACTIONS = ['block-url', 'block-continue']
     
     # Server-specific settings
     WERKZEUG_LOG_LEVEL = 'ERROR'  # Minimize Flask logs

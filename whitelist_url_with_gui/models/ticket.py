@@ -1,6 +1,7 @@
 """
 Data models for tickets and logging
 Enhanced with better validation and error handling
+Updated to support 'both' action type for automatic dual search
 """
 from datetime import datetime
 from dataclasses import dataclass
@@ -20,8 +21,8 @@ class TicketData:
     commit_job_id: Optional[str] = None
     commit_status: Optional[str] = None
     commit_progress: Optional[str] = None
-    search_strategy: str = 'targeted_single_action'
-    action_type: str = 'block-url'
+    search_strategy: str = 'automatic_dual_action_search'
+    action_type: str = 'both'
     
     def __post_init__(self):
         """Set timestamp if not provided and clean data"""
@@ -138,7 +139,7 @@ class WhitelistRequest:
     category: str
     urls: List[str]
     ticket_id: str
-    action_type: str = 'block-url'
+    action_type: str = 'both'  # Default to 'both' for automatic dual search
     
     def __post_init__(self):
         """Clean and validate data after initialization"""
@@ -168,7 +169,9 @@ class WhitelistRequest:
             if not self.ticket_id or len(self.ticket_id.strip()) == 0:
                 return False, "Ticket ID is required"
             
-            if self.action_type not in ['block-url', 'block-continue']:
+            # Updated to support 'both' action type
+            valid_action_types = ['block-url', 'block-continue', 'both']
+            if self.action_type not in valid_action_types:
                 return False, "Invalid action type"
             
             # Additional validation

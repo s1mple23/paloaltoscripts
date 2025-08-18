@@ -1,5 +1,6 @@
 """
 Input validation utilities - Fixed validation patterns
+Updated to support 'both' action type for automatic dual search
 """
 import re
 from typing import List
@@ -30,7 +31,7 @@ def validate_search_term(search_term: str) -> bool:
 
 def validate_action_type(action_type: str) -> bool:
     """
-    Validate action type
+    Validate action type - Updated to support 'both' for automatic dual search
     
     Args:
         action_type: The action type to validate
@@ -38,7 +39,9 @@ def validate_action_type(action_type: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    return action_type in config.VALID_ACTIONS
+    # Extended valid actions to include 'both' for automatic dual search
+    extended_valid_actions = config.VALID_ACTIONS + ['both']
+    return action_type in extended_valid_actions
 
 def validate_ticket_id(ticket_id: str) -> bool:
     """
