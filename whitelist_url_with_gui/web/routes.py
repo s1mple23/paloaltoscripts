@@ -1,8 +1,6 @@
 """
 Enhanced Flask routes for the web interface
-Fixed JSON response issues and improved error handling
-Added ticket download functionality and automatic ticket ID generation
-Enhanced with live ticket log updates for commit status
+Updated to support automatic dual-action search and conditional download
 """
 from flask import Flask, render_template_string, request, session, redirect, url_for, flash, jsonify, send_file
 from datetime import datetime
@@ -29,7 +27,6 @@ def generate_automatic_ticket_id():
     Format: Ticket-27JUL2025-01-06-10 (DD MMM YYYY - HH-MM-SS)
     """
     now = datetime.now()
-    # Format: 27JUL2025-14-30-45
     date_part = now.strftime("%d%b%Y").upper()
     time_part = now.strftime("%H-%M-%S")
     return f"Ticket-{date_part}-{time_part}"
@@ -105,17 +102,15 @@ def register_routes(app: Flask):
                 js_content = f.read()
             return Response(js_content, mimetype='application/javascript')
         except FileNotFoundError:
-            # Return the embedded JS content if file doesn't exist
             js_content = """
             // Embedded dashboard JavaScript
             console.log('[DEBUG] Using embedded dashboard.js');
-            // Add your dashboard.js content here if static file is missing
             """
             return Response(js_content, mimetype='application/javascript')
 
     @app.route('/search_urls', methods=['POST'])
     def search_urls():
-        """Enhanced URL search with better error handling"""
+        """Enhanced URL search with automatic dual-action search"""
         if 'api_key' not in session:
             return jsonify({'success': False, 'error': 'Not authenticated'})
         
@@ -129,9 +124,9 @@ def register_routes(app: Flask):
                 return jsonify({'success': False, 'error': 'No JSON data received'})
                 
             search_terms = data.get('search_term', '').strip()
-            action_type = data.get('action_type', 'block-url')
+            # Note: action_type is now ignored as we automatically search both
             
-            print(f"[DEBUG] Search request: terms='{search_terms}', action='{action_type}'")
+            print(f"[DEBUG] Automatic dual-action search request: terms='{search_terms}'")
             
             if not search_terms:
                 return jsonify({'success': False, 'error': 'Search terms are required'})
@@ -150,57 +145,59 @@ def register_routes(app: Flask):
                     'error': f"API connectivity failed: {connectivity.get('error', 'Unknown error')}"
                 })
             
-            print("[DEBUG] API connectivity OK, starting search...")
+            print("[DEBUG] API connectivity OK, starting automatic dual-action search...")
             
-            # Execute enhanced search with multiple terms support
-            search_result = search_service.search_blocked_urls(search_terms, action_type)
+            # Execute automatic dual-action search (searches both block-url and block-continue)
+            search_result = search_service.search_blocked_urls(search_terms, 'both')
             
             # Parse terms for logging
             parsed_terms = [t.strip() for t in search_terms.split(',') if t.strip()]
             terms_count = len(parsed_terms)
             
-            print(f"[DEBUG] Search completed: success={search_result.success}, urls_found={len(search_result.urls)}")
+            print(f"[DEBUG] Automatic dual search completed: success={search_result.success}, urls_found={len(search_result.urls)}")
             
             # Log search operation
             logging_service.log_search_operation(
-                search_terms, action_type, session['username'], 
+                search_terms, 'both', session['username'], 
                 session['hostname'], len(search_result.urls), 
                 search_result.success, search_result.error
             )
             
             if search_result.success:
-                # Enhanced debug info
+                # Enhanced debug info for dual search
                 strategy_info = search_result.strategy_info
-                debug_info = f"Multi-term search on {session['hostname']}: {terms_count} terms, " \
+                debug_info = f"Automatic dual-action search on {session['hostname']}: {terms_count} terms, " \
                            f"{strategy_info.get('search_strategy', 'unknown')} strategy, " \
                            f"found {len(search_result.urls)} matching domains"
+                
+                # Extract action-specific results if available
+                action_results = strategy_info.get('action_results', {})
+                block_url_count = len(action_results.get('block-url', {}).get('urls', []))
+                block_continue_count = len(action_results.get('block-continue', {}).get('urls', []))
                 
                 response_data = {
                     'success': True,
                     'urls': search_result.urls,
                     'count': len(search_result.urls),
                     'search_term': search_result.search_term,
-                    'action_type': search_result.action_type,
+                    'action_type': 'both',
                     'strategy_info': strategy_info,
                     'debug_info': debug_info,
-                    'message': f"Search completed successfully. Found {len(search_result.urls)} URLs." if len(search_result.urls) > 0 else "Search completed successfully. No blocked URLs found matching your criteria."
+                    'message': f"Automatische Suche erfolgreich abgeschlossen. Gefunden: {len(search_result.urls)} URLs (block-url: {block_url_count}, block-continue: {block_continue_count})." if len(search_result.urls) > 0 else "Automatische Suche erfolgreich abgeschlossen. Keine blockierten URLs gefunden, die Ihren Kriterien entsprechen."
                 }
                 
                 print(f"[DEBUG] Returning success response with {len(search_result.urls)} URLs")
                 return jsonify(response_data)
             else:
-                # Provide helpful error messages for real errors only
+                # Provide helpful error messages
                 error_msg = search_result.error if search_result.error else "Search encountered technical issues"
                 
-                # More specific error handling for actual errors
                 if error_msg and "timed out" in error_msg.lower():
-                    error_msg = "Search timed out. The firewall may be processing a large number of logs. Please try again with more specific search terms."
+                    error_msg = "Suche Timeout. Die Firewall verarbeitet möglicherweise viele Log-Einträge. Bitte versuchen Sie es mit spezifischeren Suchbegriffen."
                 elif error_msg and "connection" in error_msg.lower():
-                    error_msg = "Could not connect to the firewall. Please check your connection and try again."
+                    error_msg = "Konnte nicht zur Firewall verbinden. Bitte prüfen Sie Ihre Verbindung."
                 elif error_msg and "authentication" in error_msg.lower():
-                    error_msg = "Authentication expired. Please log in again."
-                elif error_msg and "no valid search terms" in error_msg.lower():
-                    error_msg = "Please provide valid search terms. Use comma-separated values for multiple terms."
+                    error_msg = "Authentifizierung abgelaufen. Bitte melden Sie sich erneut an."
                 
                 print(f"[DEBUG] Returning error response: {error_msg}")
                 return jsonify({'success': False, 'error': error_msg})
@@ -211,8 +208,8 @@ def register_routes(app: Flask):
         except Exception as e:
             print(f"[DEBUG] Unexpected error in search_urls: {e}")
             print(f"[DEBUG] Traceback: {traceback.format_exc()}")
-            logging_service.log_error(f"Enhanced search URLs failed for {session.get('username', 'unknown')}@{session.get('hostname', 'unknown')}", e)
-            return jsonify({'success': False, 'error': f"Search failed: {str(e)}"})
+            logging_service.log_error(f"Automatic dual search failed for {session.get('username', 'unknown')}@{session.get('hostname', 'unknown')}", e)
+            return jsonify({'success': False, 'error': f"Suche fehlgeschlagen: {str(e)}"})
 
     @app.route('/validate_manual_urls', methods=['POST'])
     def validate_manual_urls():
@@ -267,7 +264,7 @@ def register_routes(app: Flask):
         except Exception as e:
             print(f"[DEBUG] Manual URL validation error: {e}")
             logging_service.log_error("Manual URL validation failed", e)
-            return jsonify({'success': False, 'error': f"Validation failed: {str(e)}"})
+            return jsonify({'success': False, 'error': f"Validierung fehlgeschlagen: {str(e)}"})
 
     @app.route('/get_categories')
     def get_categories():
@@ -309,7 +306,7 @@ def register_routes(app: Flask):
             ticket_id = data.get('ticket_id', '').strip()
             category = data.get('category', '').strip()
             urls = data.get('urls', [])
-            action_type = data.get('action_type', 'block-url')
+            action_type = data.get('action_type', 'both')  # Now supports 'both'
             
             # Generate automatic ticket ID if none provided
             if not ticket_id:
@@ -318,7 +315,7 @@ def register_routes(app: Flask):
             
             print(f"[DEBUG] Whitelist submission data: ticket_id='{ticket_id}', category='{category}', urls_count={len(urls)}, action_type='{action_type}'")
             
-            # Validate ticket ID (now optional with auto-generation)
+            # Validate ticket ID
             if not validate_ticket_id(ticket_id):
                 return jsonify({'success': False, 'error': 'Invalid ticket ID format. Please use alphanumeric characters, hyphens, underscores, and dots only.'})
             
@@ -387,10 +384,10 @@ def register_routes(app: Flask):
                 # Log operation
                 logging_service.log_whitelist_operation(ticket_data)
                 
-                # Enhanced logging for multi-URL submissions
+                # Enhanced logging for automatic dual-action submissions
                 url_count = len(whitelist_request.urls)
                 logging_service.log_info(
-                    f"Enhanced whitelist submission completed: {url_count} URLs added to {whitelist_request.category}",
+                    f"Automatic dual-action whitelist submission completed: {url_count} URLs added to {whitelist_request.category}",
                     {
                         'ticket_id': ticket_id,
                         'url_count': url_count,
@@ -409,7 +406,8 @@ def register_routes(app: Flask):
                     'log_entry': str(ticket_data.to_dict()),
                     'auto_commit_status': commit_data.get('auto_commit_status', {}),
                     'url_count': url_count,
-                    'ticket_id': ticket_id  # Include ticket ID in response
+                    'ticket_id': ticket_id,  # Include ticket ID in response
+                    'immediate_response': commit_data.get('immediate_response', False)
                 }
                 
                 if ticket_log_file:
@@ -427,13 +425,11 @@ def register_routes(app: Flask):
             # Check for specific error types
             error_message = str(e)
             if "string did not match the expected pattern" in error_message.lower():
-                error_message = "Validation error: One of the input values contains invalid characters. Please check your ticket ID, URLs, and category name."
+                error_message = "Validierungsfehler: Ein Eingabewert enthält ungültige Zeichen. Bitte prüfen Sie Ticket-ID, URLs und Kategoriename."
             elif "invalid" in error_message.lower() and "pattern" in error_message.lower():
-                error_message = "Input validation failed. Please check that your ticket ID uses only letters, numbers, hyphens, and underscores."
-            elif "unicode" in error_message.lower() or "encoding" in error_message.lower():
-                error_message = "Character encoding error. Please ensure all inputs use standard characters only."
+                error_message = "Eingabe-Validierung fehlgeschlagen. Bitte prüfen Sie, dass Ihre Ticket-ID nur Buchstaben, Zahlen, Bindestriche und Unterstriche verwendet."
             
-            logging_service.log_error("Enhanced whitelist submission failed", e)
+            logging_service.log_error("Automatic dual-action whitelist submission failed", e)
             return jsonify({'success': False, 'error': error_message})
 
     @app.route('/download_ticket/<ticket_id>')
@@ -510,7 +506,7 @@ This is a basic ticket information file.
                 
         except Exception as e:
             print(f"[DEBUG] Download ticket error: {e}")
-            return jsonify({'success': False, 'error': f'Download failed: {str(e)}'})
+            return jsonify({'success': False, 'error': f'Download fehlgeschlagen: {str(e)}'})
 
     @app.route('/commit_status', methods=['POST'])
     def commit_status():
@@ -631,11 +627,13 @@ This is a basic ticket information file.
                 'hostname': session['hostname'],
                 'username': session['username'],
                 'enhanced_features': {
+                    'automatic_dual_search': True,
                     'multi_term_search': True,
                     'manual_url_input': True,
                     'or_logic_support': True,
                     'automatic_ticket_generation': True,
                     'ticket_download': True,
+                    'conditional_download': True,
                     'live_commit_status_updates': True
                 }
             })

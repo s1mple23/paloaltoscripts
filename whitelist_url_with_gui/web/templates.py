@@ -87,6 +87,8 @@ DASHBOARD_TEMPLATE = '''
         .btn-download { background: #17a2b8; }
         .btn-download:hover { background: #138496; }
         .url-list { max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; background: #f9f9f9; }
+        .url-category { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; }
+        .url-category h4 { margin: 0 0 10px 0; color: #007cba; font-size: 16px; }
         .url-item { display: flex; align-items: center; margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white; }
         .url-item:hover { background: #f8f9fa; }
         .url-item input[type="checkbox"] { margin-right: 10px; transform: scale(1.2); cursor: pointer; }
@@ -103,9 +105,6 @@ DASHBOARD_TEMPLATE = '''
         .whitelist-options label { font-weight: normal; }
         .commit-status { background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px; }
         .filtering-info { background: #e8f5e8; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; }
-        .action-selection { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-bottom: 15px; }
-        .action-selection label { font-weight: normal; display: inline-block; margin-right: 20px; }
-        .action-selection input[type="radio"] { margin-right: 5px; }
         .timing-info { background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; font-size: 14px; font-weight: bold; }
         .multi-search-info { background: #e1f5fe; padding: 15px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #01579b; }
         .manual-url-section { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-top: 20px; border: 1px solid #dee2e6; }
@@ -116,194 +115,184 @@ DASHBOARD_TEMPLATE = '''
         .ticket-input-info { background: #e8f4fd; padding: 12px; border-radius: 4px; margin-bottom: 15px; border-left: 4px solid #2196f3; }
         .download-section { background: #f0f8ff; padding: 15px; border-radius: 4px; margin-top: 15px; border: 2px solid #17a2b8; }
         .download-section h3 { color: #17a2b8; margin-top: 0; }
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🔒 Enhanced URL Whitelisting Dashboard</h1>
-        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Multi-URL Search + Manual Input + Ticket Download</div>
+        <div class="info">Connected to: {{ session.hostname }} as {{ session.username }} | Version {{ config.VERSION }} - Automatische Suche + URL-Kategorisierung + Bedingter Download</div>
         <a href="{{ url_for('logout') }}" class="btn btn-secondary logout">Logout</a>
     </div>
 
     <!-- Step 1: Enhanced Search for Blocked URLs -->
     <div class="section step active" id="step1">
-        <h2><span class="step-number">1</span>Enhanced URL Search</h2>
+        <h2><span class="step-number">1</span>Automatische URL Suche</h2>
         
         <div class="timing-info">
-            ⏱️ <strong>Search Duration:</strong> Each search takes approximately 3-4 minutes (4 attempts with extended timeouts)
+            ⏱️ <strong>Suchdauer:</strong> Jede Suche dauert ca. 6-8 Minuten (beide Aktionstypen automatisch)
         </div>
         
         <div class="multi-search-info">
-            🎯 <strong>Enhanced Multi-URL Search System:</strong><br>
-            • <strong>Single Term:</strong> Enter one search term (e.g., "youtube")<br>
-            • <strong>Multiple Terms:</strong> Enter comma-separated terms (e.g., "youtube, facebook, twitch")<br>
-            • <strong>OR Logic:</strong> System automatically uses OR logic for multiple terms<br>
-            • <strong>Manual URLs:</strong> Add additional URLs manually after search<br>
-            • <strong>Time Range:</strong> Searches last 3 months with up to 3,000 entries
+            🎯 <strong>Automatische Dual-Action Suche:</strong><br>
+            • <strong>Automatisch:</strong> Sucht automatisch nach <code>block-url</code> UND <code>block-continue</code><br>
+            • <strong>Einzelner Begriff:</strong> Einen Suchbegriff eingeben (z.B. "youtube")<br>
+            • <strong>Mehrere Begriffe:</strong> Komma-getrennte Begriffe (z.B. "youtube, facebook, twitch")<br>
+            • <strong>OR-Logik:</strong> System verwendet automatisch OR-Logik für mehrere Begriffe<br>
+            • <strong>Manuelle URLs:</strong> Zusätzliche URLs nach der Suche manuell hinzufügen<br>
+            • <strong>Zeitbereich:</strong> Sucht in den letzten 3 Monaten mit bis zu 3.000 Einträgen
         </div>
         
         <form id="searchForm" onsubmit="return handleSearchSubmit(event);">
             <div class="form-group">
-                <label for="search_term">Search Terms (single or comma-separated):</label>
+                <label for="search_term">Suchbegriffe (einzeln oder komma-getrennt):</label>
                 <input type="text" id="search_term" name="search_term" 
-                       placeholder="Examples: youtube  OR  youtube, facebook, activision, playstation">
+                       placeholder="Beispiele: youtube  ODER  youtube, facebook, activision, playstation">
                 <small style="color: #666; font-size: 12px;">
-                    💡 For multiple terms, separate with commas. System will search for URLs containing ANY of these terms.
+                    💡 Für mehrere Begriffe mit Kommas trennen. System sucht automatisch BEIDE Aktionstypen.
                 </small>
             </div>
             
-            <div class="action-selection">
-                <strong>Select Action Type to Search:</strong><br><br>
-                <label>
-                    <input type="radio" name="action_type" value="block-url" checked> 
-                    <strong>block-url</strong> - URLs that were completely blocked
-                </label>
-                <label>
-                    <input type="radio" name="action_type" value="block-continue"> 
-                    <strong>block-continue</strong> - URLs that were blocked but connection continued
-                </label>
+            <div class="filtering-info">
+                ℹ️ <strong>Automatische Suche:</strong> Das System sucht automatisch nach beiden Aktionstypen:
+                <code>block-url</code> (komplett blockiert) und <code>block-continue</code> (blockiert aber Verbindung fortgesetzt)
             </div>
             
-            <button type="submit" class="btn" id="searchButton">Start Enhanced Search (~3-4 minutes)</button>
-            <button type="button" class="btn btn-secondary" onclick="debugLogs()">Debug Connection</button>
+            <button type="submit" class="btn" id="searchButton">Automatische Suche starten (~6-8 Minuten)</button>
+            <button type="button" class="btn btn-secondary" onclick="debugLogs()">Debug Verbindung</button>
         </form>
         
         <div id="debugResults" style="display: none; margin-top: 15px;"></div>
     </div>
 
-    <!-- Step 2: Enhanced URL Selection with Manual Input -->
+    <!-- Step 2: Enhanced URL Selection with Category Display -->
     <div class="section step" id="step2">
-        <h2><span class="step-number">2</span>Select URLs & Add Manual URLs</h2>
+        <h2><span class="step-number">2</span>URL Auswahl & Manuelle URLs</h2>
         
         <div id="urlSelection">
-            <!-- Search results will appear here -->
+            <!-- Search results will appear here, organized by category -->
         </div>
         
         <div class="whitelist-options" id="whitelistOptions" style="display: none;">
-            <h3>Whitelisting Options:</h3>
+            <h3>Whitelisting Optionen:</h3>
             <div class="form-group">
                 <label>
-                    <input type="checkbox" id="exactMatch" checked onchange="updateUrlPreview()"> Add exact matches (e.g., domain.com/)
+                    <input type="checkbox" id="exactMatch" checked onchange="updateUrlPreview()"> Exakte Domains hinzufügen (z.B. domain.com/)
                 </label>
             </div>
             <div class="form-group">
                 <label>
-                    <input type="checkbox" id="wildcardMatch" checked onchange="updateUrlPreview()"> Add wildcard matches (e.g., *.domain.com/)
+                    <input type="checkbox" id="wildcardMatch" checked onchange="updateUrlPreview()"> Wildcard Domains hinzufügen (z.B. *.domain.com/)
                 </label>
             </div>
         </div>
         
         <div class="selected-urls" id="selectedUrlsPreview" style="display: none;">
-            <h3>URLs to be whitelisted:</h3>
+            <h3>URLs die gewhitelistet werden:</h3>
             <div id="urlPreviewList"></div>
         </div>
         
-        <button class="btn" onclick="proceedToCategories()" id="proceedBtn" style="display: none;">Proceed to Category Selection</button>
+        <button class="btn" onclick="proceedToCategories()" id="proceedBtn" style="display: none;">Weiter zur Kategorieauswahl</button>
     </div>
 
     <!-- Step 3: Select Category -->
     <div class="section step" id="step3">
-        <h2><span class="step-number">3</span>Select URL Category</h2>
+        <h2><span class="step-number">3</span>URL Kategorie auswählen</h2>
         
         <div class="form-group">
-            <label for="urlCategory">Choose Custom URL Category:</label>
+            <label for="urlCategory">Custom URL Kategorie wählen:</label>
             <select id="urlCategory" name="urlCategory">
-                <option value="">Loading categories...</option>
+                <option value="">Kategorien werden geladen...</option>
             </select>
         </div>
         
-        <button class="btn" onclick="proceedToTicket()" id="categoryProceedBtn" style="display: none;">Continue</button>
+        <button class="btn" onclick="proceedToTicket()" id="categoryProceedBtn" style="display: none;">Weiter</button>
     </div>
 
     <!-- Step 4: Ticket ID and Final Submission -->
     <div class="section step" id="step4">
-        <h2><span class="step-number">4</span>Change Ticket & Submit</h2>
+        <h2><span class="step-number">4</span>Change Ticket & Absenden</h2>
         
         <div class="ticket-input-info">
             📋 <strong>Ticket ID Information:</strong><br>
-            • <strong>Optional:</strong> Leave empty to auto-generate a ticket ID<br>
-            • <strong>Auto-Format:</strong> Ticket-27JUL2025-14-30-45 (current date and time)<br>
-            • <strong>Custom:</strong> Enter your own change/ticket ID if needed
+            • <strong>Optional:</strong> Leer lassen für automatische Generierung<br>
+            • <strong>Auto-Format:</strong> Ticket-27JUL2025-14-30-45 (aktuelles Datum und Zeit)<br>
+            • <strong>Eigene ID:</strong> Bei Bedarf eigene Change/Ticket ID eingeben
         </div>
         
         <div class="form-group">
-            <label for="ticketId">Change/Ticket ID (Optional - auto-generated if empty):</label>
-            <input type="text" id="ticketId" name="ticketId" placeholder="Leave empty for auto-generation or enter custom ID (e.g., CHG-2024-001234)">
+            <label for="ticketId">Change/Ticket ID (Optional - wird automatisch generiert wenn leer):</label>
+            <input type="text" id="ticketId" name="ticketId" placeholder="Leer lassen für Auto-Generierung oder eigene ID eingeben (z.B. CHG-2024-001234)">
             <small style="color: #666; font-size: 12px;">
-                💡 Auto-generated format: Ticket-27JUL2025-14-30-45 (current date/time)
+                💡 Auto-generiertes Format: Ticket-27JUL2025-14-30-45 (aktuelles Datum/Zeit)
             </small>
         </div>
         
         <div id="finalSummary"></div>
         
-        <button class="btn btn-success" onclick="submitWhitelist()" id="submitBtn">Submit Enhanced Whitelist Request</button>
+        <button class="btn btn-success" onclick="submitWhitelist()" id="submitBtn">Whitelist Request absenden</button>
     </div>
 
     <!-- Step 5: Results -->
     <div class="section step" id="step5">
-        <h2><span class="step-number">5</span>Results</h2>
+        <h2><span class="step-number">5</span>Ergebnisse</h2>
         <div id="results"></div>
-        <button class="btn" onclick="startOver()">Start New Request</button>
+        <button class="btn" onclick="startOver()">Neue Anfrage starten</button>
     </div>
 
     <script>
-        // Embedded JavaScript to avoid loading issues
-        console.log('[DEBUG] Dashboard script starting...');
-        
         // Global variables
         var selectedUrls = [];
         var searchResults = [];
         var manualUrls = [];
         var categories = {};
-        var selectedActionType = 'block-url';
-        var currentTicketId = null; // Store current ticket ID for download
+        var currentTicketId = null;
+        var urlsByCategory = {}; // Store URLs organized by category
 
         // Prevent form submission from reloading page
         function handleSearchSubmit(event) {
             event.preventDefault();
             event.stopPropagation();
             
-            console.log('[DEBUG] Search form submitted - preventing default');
+            console.log('[DEBUG] Automatische Dual-Action Suche gestartet');
             
             var searchTerms = document.getElementById('search_term').value.trim();
-            selectedActionType = document.querySelector('input[name="action_type"]:checked').value;
             
             console.log('[DEBUG] Search terms:', searchTerms);
-            console.log('[DEBUG] Action type:', selectedActionType);
             
             if (!searchTerms) {
-                alert('Please enter at least one search term');
+                alert('Bitte mindestens einen Suchbegriff eingeben');
                 return false;
             }
             
             // Validate search terms
             var terms = searchTerms.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
             if (terms.length === 0) {
-                alert('Please enter valid search terms');
+                alert('Bitte gültige Suchbegriffe eingeben');
                 return false;
             }
             
             var resultsDiv = document.getElementById('urlSelection');
             var searchBtn = document.getElementById('searchButton');
             
-            console.log('[DEBUG] Starting enhanced multi-term search request...');
+            console.log('[DEBUG] Starting automatic dual-action search request...');
             
             searchBtn.disabled = true;
-            searchBtn.textContent = 'Searching... (~3-4 min)';
+            searchBtn.textContent = 'Automatische Suche läuft... (~6-8 min)';
             
             activateStep(2);
             
             // Show different message based on number of terms
             var searchMessage = terms.length === 1 
-                ? '🎯 Targeted search for "' + terms[0] + '" with action "' + selectedActionType + '"'
-                : '🎯 Multi-term search for ' + terms.length + ' terms (' + terms.join(', ') + ') with OR logic and action "' + selectedActionType + '"';
+                ? '🎯 Automatische Suche für "' + terms[0] + '" (block-url UND block-continue)'
+                : '🎯 Automatische Multi-Begriff Suche für ' + terms.length + ' Begriffe (' + terms.join(', ') + ') mit OR-Logik (block-url UND block-continue)';
             
             resultsDiv.innerHTML = '<div class="loading">' + searchMessage + '...<br>' +
-                                  '<small>⏱️ Running up to 4 attempts with extended timeouts<br>' +
-                                  'Searching last 3 months, up to 3,000 entries<br>' +
-                                  '<strong>Estimated time: ~3-4 minutes - Please wait...</strong></small></div>';
+                                  '<small>⏱️ Läuft bis zu 8 Versuche mit erweiterten Timeouts<br>' +
+                                  'Sucht in letzten 3 Monaten, bis zu 3.000 Einträge pro Aktion<br>' +
+                                  '<strong>Geschätzte Zeit: ~6-8 Minuten - Bitte warten...</strong></small></div>';
             
-            console.log('[DEBUG] Making fetch request to /search_urls');
+            console.log('[DEBUG] Making fetch request to /search_urls with automatic dual search');
             
             fetch('/search_urls', {
                 method: 'POST',
@@ -313,13 +302,12 @@ DASHBOARD_TEMPLATE = '''
                 },
                 body: JSON.stringify({
                     search_term: searchTerms,
-                    action_type: selectedActionType
+                    action_type: 'both' // This will be automatically handled
                 })
             })
             .then(function(response) {
                 console.log('[DEBUG] Got response:', response.status, response.statusText);
                 
-                // Check if response is JSON
                 var contentType = response.headers.get('Content-Type');
                 if (!contentType || !contentType.includes('application/json')) {
                     throw new Error('Server returned non-JSON response (got: ' + (contentType || 'unknown') + ')');
@@ -335,33 +323,32 @@ DASHBOARD_TEMPLATE = '''
                 console.log('[DEBUG] Response data:', data);
                 
                 if (data.success) {
-                    console.log('[DEBUG] Search successful, found URLs:', data.urls);
+                    console.log('[DEBUG] Automatic dual search successful, found URLs:', data.urls);
                     searchResults = data.urls || [];
-                    displaySearchResults(searchResults, searchTerms, selectedActionType, data.debug_info);
+                    displaySearchResultsByCategory(searchResults, searchTerms, data.strategy_info);
                     showManualUrlInput();
                 } else {
                     console.log('[DEBUG] Search failed:', data.error);
                     var errorMessage = data.error || 'Unknown error occurred';
                     
-                    // Don't treat "no URLs found" as an error in the UI
                     if (errorMessage.includes('no URLs were found') || errorMessage.includes('no matching URLs')) {
                         searchResults = [];
-                        displaySearchResults([], searchTerms, selectedActionType, data.debug_info);
+                        displaySearchResultsByCategory([], searchTerms, data.strategy_info);
                         showManualUrlInput();
                     } else {
-                        resultsDiv.innerHTML = '<div class="error">Search Error: ' + errorMessage + '</div>';
+                        resultsDiv.innerHTML = '<div class="error">Suche Fehler: ' + errorMessage + '</div>';
                         showManualUrlInput();
                     }
                 }
             })
             .catch(function(error) {
                 console.error('[DEBUG] Fetch error:', error);
-                var errorMessage = 'Network error: ' + error.message;
+                var errorMessage = 'Netzwerk Fehler: ' + error.message;
                 
                 if (error.message.includes('non-JSON response')) {
-                    errorMessage = 'Server error: The server returned an unexpected response. Please check your firewall connection and try again.';
+                    errorMessage = 'Server Fehler: Server hat unerwartete Antwort gesendet. Bitte Firewall-Verbindung prüfen.';
                 } else if (error.message.includes('Failed to fetch')) {
-                    errorMessage = 'Connection error: Could not connect to the server. Please check your network connection.';
+                    errorMessage = 'Verbindungsfehler: Konnte nicht zum Server verbinden. Bitte Netzwerkverbindung prüfen.';
                 }
                 
                 resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
@@ -370,13 +357,16 @@ DASHBOARD_TEMPLATE = '''
             .finally(function() {
                 console.log('[DEBUG] Search request completed');
                 searchBtn.disabled = false;
-                searchBtn.textContent = 'Start Enhanced Search (~3-4 minutes)';
+                searchBtn.textContent = 'Automatische Suche starten (~6-8 Minuten)';
             });
             
             return false;
         }
         
-        function displaySearchResults(urls, searchTerms, actionType, debugInfo) {
+        /**
+         * Display search results organized by action category
+         */
+        function displaySearchResultsByCategory(urls, searchTerms, strategyInfo) {
             var resultsDiv = document.getElementById('urlSelection');
             var terms = searchTerms.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t.length > 0; });
             
@@ -384,36 +374,80 @@ DASHBOARD_TEMPLATE = '''
             
             if (urls.length === 0) {
                 html = '<div style="text-align: center; padding: 20px; color: #666;">' +
-                    '<h4>✅ Search Completed - No URLs Found</h4>';
+                    '<h4>✅ Automatische Suche abgeschlossen - Keine URLs gefunden</h4>';
                 
                 if (terms.length === 1) {
-                    html += '<p>No URLs containing "' + terms[0] + '" were found with action: <strong>' + actionType + '</strong></p>';
+                    html += '<p>Keine URLs mit "' + terms[0] + '" gefunden für block-url oder block-continue</p>';
                 } else {
-                    html += '<p>No URLs containing any of the terms (' + terms.join(', ') + ') were found with action: <strong>' + actionType + '</strong></p>';
+                    html += '<p>Keine URLs mit den Begriffen (' + terms.join(', ') + ') gefunden für block-url oder block-continue</p>';
                 }
                 
-                html += '<p><small>✅ Search completed successfully. You can add URLs manually below.</small></p>' +
+                html += '<p><small>✅ Automatische Suche erfolgreich abgeschlossen. Sie können unten manuell URLs hinzufügen.</small></p>' +
                     '</div>';
             } else {
-                html = '<h3>🎯 Found ' + urls.length + ' blocked URLs:</h3>';
+                html = '<h3>🎯 Automatische Suche: ' + urls.length + ' URLs gefunden</h3>';
                 
-                if (terms.length === 1) {
+                // Show strategy info if available
+                if (strategyInfo && strategyInfo.action_results) {
+                    var blockUrlCount = strategyInfo.action_results['block-url'] ? strategyInfo.action_results['block-url'].count : 0;
+                    var blockContinueCount = strategyInfo.action_results['block-continue'] ? strategyInfo.action_results['block-continue'].count : 0;
+                    
                     html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
-                           '✅ <strong>Single-term Results:</strong> Searched for "' + terms[0] + '" with action "' + actionType + '"<br>';
+                           '✅ <strong>Automatische Dual-Action Ergebnisse:</strong><br>' +
+                           '🚫 <strong>block-url:</strong> ' + blockUrlCount + ' URLs (komplett blockiert)<br>' +
+                           '⚠️ <strong>block-continue:</strong> ' + blockContinueCount + ' URLs (blockiert aber Verbindung fortgesetzt)<br>' +
+                           '📅 <strong>Zeitbereich:</strong> Letzte 3 Monate, bis zu 3.000 Einträge pro Aktion<br>' +
+                           'Wählen Sie die URLs aus, die Sie whitelisten möchten:</div>';
+                    
+                    // Organize URLs by action type for display
+                    urlsByCategory = {
+                        'block-url': strategyInfo.action_results['block-url'] ? strategyInfo.action_results['block-url'].urls : [],
+                        'block-continue': strategyInfo.action_results['block-continue'] ? strategyInfo.action_results['block-continue'].urls : []
+                    };
+                    
+                    // Display URLs by category
+                    if (urlsByCategory['block-url'].length > 0) {
+                        html += '<div class="url-category">';
+                        html += '<h4>🚫 block-url (' + urlsByCategory['block-url'].length + ' URLs)</h4>';
+                        html += '<small style="color: #666;">URLs die komplett blockiert wurden</small>';
+                        for (var i = 0; i < urlsByCategory['block-url'].length; i++) {
+                            var url = urlsByCategory['block-url'][i];
+                            var uniqueId = 'blockurl_' + i;
+                            html += '<div class="url-item">';
+                            html += '<input type="checkbox" id="' + uniqueId + '" value="' + url + '" onchange="updateSelectedUrls()">';
+                            html += '<label for="' + uniqueId + '">' + url + '</label>';
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    }
+                    
+                    if (urlsByCategory['block-continue'].length > 0) {
+                        html += '<div class="url-category">';
+                        html += '<h4>⚠️ block-continue (' + urlsByCategory['block-continue'].length + ' URLs)</h4>';
+                        html += '<small style="color: #666;">URLs die blockiert wurden aber Verbindung fortgesetzt</small>';
+                        for (var i = 0; i < urlsByCategory['block-continue'].length; i++) {
+                            var url = urlsByCategory['block-continue'][i];
+                            var uniqueId = 'blockcontinue_' + i;
+                            html += '<div class="url-item">';
+                            html += '<input type="checkbox" id="' + uniqueId + '" value="' + url + '" onchange="updateSelectedUrls()">';
+                            html += '<label for="' + uniqueId + '">' + url + '</label>';
+                            html += '</div>';
+                        }
+                        html += '</div>';
+                    }
                 } else {
+                    // Fallback for older format
                     html += '<div style="margin: 10px 0; padding: 10px; background: #f0f8ff; border-radius: 4px;">' +
-                           '✅ <strong>Multi-term OR Results:</strong> Searched for ' + terms.length + ' terms (' + terms.join(', ') + ') with action "' + actionType + '"<br>';
-                }
-                
-                html += '📅 <strong>Time Range:</strong> Last 3 months, up to 3,000 entries<br>' +
-                       'Click the checkboxes below to select URLs for whitelisting:</div>';
-                
-                for (var i = 0; i < urls.length; i++) {
-                    var url = urls[i];
-                    html += '<div class="url-item" style="margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: white;">';
-                    html += '<input type="checkbox" id="url_' + i + '" value="' + url + '" style="margin-right: 10px; transform: scale(1.2);" onchange="updateSelectedUrls()">';
-                    html += '<label for="url_' + i + '" style="cursor: pointer; user-select: none;">' + url + '</label>';
-                    html += '</div>';
+                           '✅ <strong>Suchergebnisse:</strong> Automatische Suche für block-url und block-continue<br>' +
+                           'Wählen Sie die URLs aus, die Sie whitelisten möchten:</div>';
+                    
+                    for (var i = 0; i < urls.length; i++) {
+                        var url = urls[i];
+                        html += '<div class="url-item">';
+                        html += '<input type="checkbox" id="url_' + i + '" value="' + url + '" onchange="updateSelectedUrls()">';
+                        html += '<label for="url_' + i + '">' + url + '</label>';
+                        html += '</div>';
+                    }
                 }
             }
             
@@ -426,16 +460,15 @@ DASHBOARD_TEMPLATE = '''
             var existing = document.getElementById('manualUrlSection');
             if (!existing) {
                 var manualHtml = '<div id="manualUrlSection" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;">' +
-                                '<h4>📝 Add Manual URLs</h4>' +
-                                '<p>You can also add URLs manually (one per line or comma-separated):</p>' +
-                                '<textarea id="manualUrls" placeholder="Example:&#10;youtube.com&#10;facebook.com&#10;*.google.com&#10;or: youtube.com, facebook.com, *.google.com" ' +
+                                '<h4>📝 Manuelle URLs hinzufügen</h4>' +
+                                '<p>Sie können auch URLs manuell hinzufügen (eine pro Zeile oder komma-getrennt):</p>' +
+                                '<textarea id="manualUrls" placeholder="Beispiel:&#10;youtube.com&#10;facebook.com&#10;*.google.com&#10;oder: youtube.com, facebook.com, *.google.com" ' +
                                 'style="width: 100%; height: 100px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;"></textarea>' +
                                 '<div id="manualUrlValidation" style="margin-top: 10px;"></div>' +
-                                '<button type="button" class="btn" onclick="addManualUrls()" style="margin-top: 10px;">Add Manual URLs</button>' +
+                                '<button type="button" class="btn" onclick="addManualUrls()" style="margin-top: 10px;">Manuelle URLs hinzufügen</button>' +
                                 '</div>';
                 urlSelection.insertAdjacentHTML('afterend', manualHtml);
                 
-                // Add event listener for validation
                 var manualUrlInput = document.getElementById('manualUrls');
                 if (manualUrlInput) {
                     manualUrlInput.addEventListener('input', validateManualUrls);
@@ -443,128 +476,17 @@ DASHBOARD_TEMPLATE = '''
             }
         }
         
-        function validateManualUrls() {
-            var input = document.getElementById('manualUrls').value.trim();
-            var validationDiv = document.getElementById('manualUrlValidation');
-            
-            if (!input) {
-                validationDiv.innerHTML = '';
-                return;
-            }
-            
-            fetch('/validate_manual_urls', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({manual_urls: input})
-            })
-            .then(function(response) {
-                return response.json();
-            })
-            .then(function(data) {
-                if (data.success) {
-                    var html = '';
-                    if (data.valid_urls && data.valid_urls.length > 0) {
-                        html += '<div style="color: green;">✅ Valid URLs (' + data.valid_urls.length + '): ' + data.valid_urls.join(', ') + '</div>';
-                    }
-                    if (data.invalid_urls && data.invalid_urls.length > 0) {
-                        html += '<div style="color: red;">❌ Invalid URLs (' + data.invalid_urls.length + '): ' + data.invalid_urls.join(', ') + '</div>';
-                    }
-                    validationDiv.innerHTML = html;
-                }
-            })
-            .catch(function(error) {
-                validationDiv.innerHTML = '<div style="color: orange;">⚠️ Validation temporarily unavailable</div>';
-            });
-        }
-        
-        function addManualUrls() {
-            var input = document.getElementById('manualUrls').value.trim();
-            if (!input) {
-                alert('Please enter some URLs');
-                return;
-            }
-            
-            fetch('/validate_manual_urls', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({manual_urls: input})
-            })
-            .then(function(response) {
-                return response.json();
-            })
-            .then(function(data) {
-                if (data.success && data.valid_urls && data.valid_urls.length > 0) {
-                    // Add valid URLs to manual list
-                    data.valid_urls.forEach(function(url) {
-                        if (manualUrls.indexOf(url) === -1) {
-                            manualUrls.push(url);
-                        }
-                    });
-                    
-                    // Clear input
-                    document.getElementById('manualUrls').value = '';
-                    document.getElementById('manualUrlValidation').innerHTML = '';
-                    
-                    // Update display
-                    displayManualUrls();
-                    updateSelectedUrls();
-                    
-                    alert('Added ' + data.valid_urls.length + ' valid URLs to selection');
-                    
-                    if (data.invalid_urls && data.invalid_urls.length > 0) {
-                        alert('Note: ' + data.invalid_urls.length + ' invalid URLs were ignored: ' + data.invalid_urls.join(', '));
-                    }
-                } else {
-                    alert('No valid URLs found. Please check your input.');
-                }
-            })
-            .catch(function(error) {
-                alert('Error validating URLs: ' + error.message);
-            });
-        }
-        
-        function displayManualUrls() {
-            var manualSection = document.getElementById('manualUrlSection');
-            var existingDisplay = document.getElementById('manualUrlDisplay');
-            
-            if (existingDisplay) {
-                existingDisplay.remove();
-            }
-            
-            if (manualUrls.length > 0) {
-                var html = '<div id="manualUrlDisplay" style="margin-top: 15px; padding: 10px; background: #e8f5e8; border-radius: 4px;">' +
-                          '<h5>📋 Manual URLs (' + manualUrls.length + '):</h5>';
-                
-                for (var i = 0; i < manualUrls.length; i++) {
-                    html += '<div style="margin: 5px 0; padding: 5px; background: white; border-radius: 3px; display: flex; align-items: center;">' +
-                           '<input type="checkbox" id="manual_' + i + '" checked style="margin-right: 10px;" onchange="updateSelectedUrls()">' +
-                           '<span style="flex: 1;">' + manualUrls[i] + '</span>' +
-                           '<button onclick="removeManualUrl(' + i + ')" style="padding: 2px 8px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Remove</button>' +
-                           '</div>';
-                }
-                
-                html += '</div>';
-                manualSection.insertAdjacentHTML('afterend', html);
-            }
-        }
-        
-        function removeManualUrl(index) {
-            manualUrls.splice(index, 1);
-            displayManualUrls();
-            updateSelectedUrls();
-        }
-        
         function updateSelectedUrls() {
             console.log('[DEBUG] Updating selected URLs');
             selectedUrls = [];
             
-            // Add selected search results
-            for (var i = 0; i < searchResults.length; i++) {
-                var checkbox = document.getElementById('url_' + i);
-                if (checkbox && checkbox.checked) {
-                    selectedUrls.push(searchResults[i]);
+            // Add selected URLs from both categories
+            var allCheckboxes = document.querySelectorAll('input[type="checkbox"][id^="blockurl_"], input[type="checkbox"][id^="blockcontinue_"], input[type="checkbox"][id^="url_"]');
+            allCheckboxes.forEach(function(checkbox) {
+                if (checkbox.checked) {
+                    selectedUrls.push(checkbox.value);
                 }
-            }
+            });
             
             // Add selected manual URLs
             for (var i = 0; i < manualUrls.length; i++) {
@@ -600,14 +522,11 @@ DASHBOARD_TEMPLATE = '''
             for (var i = 0; i < selectedUrls.length; i++) {
                 var url = selectedUrls[i];
                 
-                // Handle different URL formats
                 if (url.startsWith('*.')) {
-                    // Already a wildcard
                     if (wildcardMatch) {
                         html += '<li>' + url + '</li>';
                     }
                     if (exactMatch) {
-                        // Remove wildcard for exact match
                         var exactUrl = url.substring(2);
                         if (!exactUrl.endsWith('/')) {
                             exactUrl += '/';
@@ -615,7 +534,6 @@ DASHBOARD_TEMPLATE = '''
                         html += '<li>' + exactUrl + '</li>';
                     }
                 } else {
-                    // Regular domain
                     var domain = url.endsWith('/') ? url : url + '/';
                     if (exactMatch) {
                         html += '<li>' + domain + '</li>';
@@ -628,6 +546,114 @@ DASHBOARD_TEMPLATE = '''
             html += '</ul>';
             
             previewList.innerHTML = html;
+        }
+        
+        function validateManualUrls() {
+            var input = document.getElementById('manualUrls').value.trim();
+            var validationDiv = document.getElementById('manualUrlValidation');
+            
+            if (!input) {
+                validationDiv.innerHTML = '';
+                return;
+            }
+            
+            fetch('/validate_manual_urls', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({manual_urls: input})
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success) {
+                    var html = '';
+                    if (data.valid_urls && data.valid_urls.length > 0) {
+                        html += '<div style="color: green;">✅ Gültige URLs (' + data.valid_urls.length + '): ' + data.valid_urls.join(', ') + '</div>';
+                    }
+                    if (data.invalid_urls && data.invalid_urls.length > 0) {
+                        html += '<div style="color: red;">❌ Ungültige URLs (' + data.invalid_urls.length + '): ' + data.invalid_urls.join(', ') + '</div>';
+                    }
+                    validationDiv.innerHTML = html;
+                }
+            })
+            .catch(function(error) {
+                validationDiv.innerHTML = '<div style="color: orange;">⚠️ Validierung vorübergehend nicht verfügbar</div>';
+            });
+        }
+        
+        function addManualUrls() {
+            var input = document.getElementById('manualUrls').value.trim();
+            if (!input) {
+                alert('Bitte URLs eingeben');
+                return;
+            }
+            
+            fetch('/validate_manual_urls', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({manual_urls: input})
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(data) {
+                if (data.success && data.valid_urls && data.valid_urls.length > 0) {
+                    data.valid_urls.forEach(function(url) {
+                        if (manualUrls.indexOf(url) === -1) {
+                            manualUrls.push(url);
+                        }
+                    });
+                    
+                    document.getElementById('manualUrls').value = '';
+                    document.getElementById('manualUrlValidation').innerHTML = '';
+                    
+                    displayManualUrls();
+                    updateSelectedUrls();
+                    
+                    alert(data.valid_urls.length + ' gültige URLs zur Auswahl hinzugefügt');
+                    
+                    if (data.invalid_urls && data.invalid_urls.length > 0) {
+                        alert('Hinweis: ' + data.invalid_urls.length + ' ungültige URLs ignoriert: ' + data.invalid_urls.join(', '));
+                    }
+                } else {
+                    alert('Keine gültigen URLs gefunden. Bitte Eingabe prüfen.');
+                }
+            })
+            .catch(function(error) {
+                alert('Fehler bei URL-Validierung: ' + error.message);
+            });
+        }
+        
+        function displayManualUrls() {
+            var manualSection = document.getElementById('manualUrlSection');
+            var existingDisplay = document.getElementById('manualUrlDisplay');
+            
+            if (existingDisplay) {
+                existingDisplay.remove();
+            }
+            
+            if (manualUrls.length > 0) {
+                var html = '<div id="manualUrlDisplay" style="margin-top: 15px; padding: 10px; background: #e8f5e8; border-radius: 4px;">' +
+                          '<h5>📋 Manuelle URLs (' + manualUrls.length + '):</h5>';
+                
+                for (var i = 0; i < manualUrls.length; i++) {
+                    html += '<div style="margin: 5px 0; padding: 5px; background: white; border-radius: 3px; display: flex; align-items: center;">' +
+                           '<input type="checkbox" id="manual_' + i + '" checked style="margin-right: 10px;" onchange="updateSelectedUrls()">' +
+                           '<span style="flex: 1;">' + manualUrls[i] + '</span>' +
+                           '<button onclick="removeManualUrl(' + i + ')" style="padding: 2px 8px; background: #dc3545; color: white; border: none; border-radius: 3px; cursor: pointer;">Entfernen</button>' +
+                           '</div>';
+                }
+                
+                html += '</div>';
+                manualSection.insertAdjacentHTML('afterend', html);
+            }
+        }
+        
+        function removeManualUrl(index) {
+            manualUrls.splice(index, 1);
+            displayManualUrls();
+            updateSelectedUrls();
         }
         
         function activateStep(stepNumber) {
@@ -650,7 +676,7 @@ DASHBOARD_TEMPLATE = '''
             
             var resultsDiv = document.getElementById('debugResults');
             resultsDiv.style.display = 'block';
-            resultsDiv.innerHTML = '<div class="loading">🔍 Testing firewall connection...</div>';
+            resultsDiv.innerHTML = '<div class="loading">🔍 Teste Firewall-Verbindung...</div>';
             
             fetch('/debug_logs')
             .then(function(response) {
@@ -660,16 +686,16 @@ DASHBOARD_TEMPLATE = '''
                 if (data.success) {
                     var html = '<div><h3>🔧 Debug Information</h3>';
                     
-                    html += '<h4>API Connectivity:</h4>';
+                    html += '<h4>API Konnektivität:</h4>';
                     if (data.connectivity.success) {
                         html += '<div style="color: green;">✅ ' + data.connectivity.message + '</div>';
                     } else {
                         html += '<div style="color: red;">❌ ' + data.connectivity.error + '</div>';
                     }
                     
-                    html += '<h4>Available Log Types:</h4>';
+                    html += '<h4>Verfügbare Log-Typen:</h4>';
                     html += '<table style="width: 100%; border-collapse: collapse;">';
-                    html += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Log Type</th><th style="border: 1px solid #ddd; padding: 8px;">Status</th></tr>';
+                    html += '<tr><th style="border: 1px solid #ddd; padding: 8px;">Log Typ</th><th style="border: 1px solid #ddd; padding: 8px;">Status</th></tr>';
                     
                     Object.keys(data.log_types).forEach(function(logType) {
                         var status = data.log_types[logType];
@@ -678,7 +704,7 @@ DASHBOARD_TEMPLATE = '''
                         
                         if (typeof status === 'number') {
                             statusColor = status > 0 ? 'green' : 'orange';
-                            statusText = status > 0 ? '✅ ' + status + ' entries' : '⚠️ 0 entries';
+                            statusText = status > 0 ? '✅ ' + status + ' Einträge' : '⚠️ 0 Einträge';
                         } else if (typeof status === 'string') {
                             if (status.includes('Error') || status.includes('Exception')) {
                                 statusColor = 'red';
@@ -699,21 +725,20 @@ DASHBOARD_TEMPLATE = '''
                     });
                     html += '</table>';
                     
-                    // Enhanced features info
                     if (data.enhanced_features) {
-                        html += '<h4>Enhanced Features:</h4>';
+                        html += '<h4>Erweiterte Features:</h4>';
                         html += '<ul>';
                         if (data.enhanced_features.multi_term_search) {
-                            html += '<li>✅ Multi-term OR logic search</li>';
+                            html += '<li>✅ Multi-Begriff OR-Logik Suche</li>';
                         }
                         if (data.enhanced_features.manual_url_input) {
-                            html += '<li>✅ Manual URL input</li>';
+                            html += '<li>✅ Manuelle URL Eingabe</li>';
                         }
                         if (data.enhanced_features.automatic_ticket_generation) {
-                            html += '<li>✅ Automatic ticket ID generation</li>';
+                            html += '<li>✅ Automatische Ticket-ID Generierung</li>';
                         }
                         if (data.enhanced_features.ticket_download) {
-                            html += '<li>✅ Ticket log download</li>';
+                            html += '<li>✅ Ticket-Log Download</li>';
                         }
                         html += '</ul>';
                     }
@@ -722,17 +747,17 @@ DASHBOARD_TEMPLATE = '''
                     
                     resultsDiv.innerHTML = html;
                 } else {
-                    resultsDiv.innerHTML = '<div class="error">Debug failed: ' + data.error + '</div>';
+                    resultsDiv.innerHTML = '<div class="error">Debug fehlgeschlagen: ' + data.error + '</div>';
                 }
             })
             .catch(function(error) {
-                resultsDiv.innerHTML = '<div class="error">Debug request failed: ' + error.message + '</div>';
+                resultsDiv.innerHTML = '<div class="error">Debug-Anfrage fehlgeschlagen: ' + error.message + '</div>';
             });
         }
         
         function proceedToCategories() {
             if (selectedUrls.length === 0) {
-                alert('Please select at least one URL');
+                alert('Bitte mindestens eine URL auswählen');
                 return;
             }
             activateStep(3);
@@ -741,7 +766,7 @@ DASHBOARD_TEMPLATE = '''
         
         function loadCategories() {
             var categorySelect = document.getElementById('urlCategory');
-            categorySelect.innerHTML = '<option value="">Loading categories...</option>';
+            categorySelect.innerHTML = '<option value="">Kategorien werden geladen...</option>';
             
             fetch('/get_categories')
             .then(function(response) {
@@ -750,7 +775,7 @@ DASHBOARD_TEMPLATE = '''
             .then(function(data) {
                 if (data.success) {
                     categories = data.categories;
-                    categorySelect.innerHTML = '<option value="">Select a category...</option>';
+                    categorySelect.innerHTML = '<option value="">Kategorie auswählen...</option>';
                     
                     Object.keys(categories).forEach(function(displayName) {
                         var option = document.createElement('option');
@@ -764,18 +789,18 @@ DASHBOARD_TEMPLATE = '''
                         proceedBtn.style.display = this.value ? 'inline-block' : 'none';
                     });
                 } else {
-                    categorySelect.innerHTML = '<option value="">Error: ' + data.error + '</option>';
+                    categorySelect.innerHTML = '<option value="">Fehler: ' + data.error + '</option>';
                 }
             })
             .catch(function(error) {
-                categorySelect.innerHTML = '<option value="">Error: ' + error.message + '</option>';
+                categorySelect.innerHTML = '<option value="">Fehler: ' + error.message + '</option>';
             });
         }
         
         function proceedToTicket() {
             var categorySelect = document.getElementById('urlCategory');
             if (!categorySelect.value) {
-                alert('Please select a URL category');
+                alert('Bitte eine URL-Kategorie auswählen');
                 return;
             }
             activateStep(4);
@@ -792,7 +817,6 @@ DASHBOARD_TEMPLATE = '''
                 var url = selectedUrls[i];
                 
                 if (url.startsWith('*.')) {
-                    // Already a wildcard
                     if (wildcardMatch) {
                         urlsToAdd.push(url);
                     }
@@ -804,7 +828,6 @@ DASHBOARD_TEMPLATE = '''
                         urlsToAdd.push(exactUrl);
                     }
                 } else {
-                    // Regular domain
                     var domain = url.endsWith('/') ? url : url + '/';
                     if (exactMatch) urlsToAdd.push(domain);
                     if (wildcardMatch) urlsToAdd.push('*.' + domain);
@@ -817,15 +840,14 @@ DASHBOARD_TEMPLATE = '''
                 urlsList += '<li>' + urlsToAdd[i] + '</li>';
             }
             
-            var searchInfo = searchResults.length > 0 ? ' (' + searchResults.length + ' from search' : '';
-            var manualInfo = manualUrls.length > 0 ? ', ' + manualUrls.length + ' manual' : '';
+            var searchInfo = searchResults.length > 0 ? ' (' + searchResults.length + ' aus Suche' : '';
+            var manualInfo = manualUrls.length > 0 ? ', ' + manualUrls.length + ' manuell' : '';
             var sourceInfo = searchInfo + manualInfo + (searchInfo ? ')' : '');
             
-            summaryDiv.innerHTML = '<div><h3>Summary:</h3>' +
-                                  '<p><strong>Search Action:</strong> ' + selectedActionType + '</p>' +
-                                  '<p><strong>Category:</strong> ' + categorySelect.value + '</p>' +
-                                  '<p><strong>Total URLs selected:</strong> ' + selectedUrls.length + sourceInfo + '</p>' +
-                                  '<p><strong>URLs to add:</strong></p><ul>' + urlsList + '</ul></div>';
+            summaryDiv.innerHTML = '<div><h3>Zusammenfassung:</h3>' +
+                                  '<p><strong>Kategorie:</strong> ' + categorySelect.value + '</p>' +
+                                  '<p><strong>URLs ausgewählt:</strong> ' + selectedUrls.length + sourceInfo + '</p>' +
+                                  '<p><strong>URLs hinzuzufügen:</strong></p><ul>' + urlsList + '</ul></div>';
         }
         
         function submitWhitelist() {
@@ -834,15 +856,13 @@ DASHBOARD_TEMPLATE = '''
             var exactMatch = document.getElementById('exactMatch').checked;
             var wildcardMatch = document.getElementById('wildcardMatch').checked;
             
-            // Note: ticketId is now optional and will be auto-generated if empty
-            
             if (!exactMatch && !wildcardMatch) {
-                alert('Please select at least one whitelisting option');
+                alert('Bitte mindestens eine Whitelisting-Option auswählen');
                 return;
             }
             
             if (!categorySelect.value) {
-                alert('Please select a URL category');
+                alert('Bitte eine URL-Kategorie auswählen');
                 return;
             }
             
@@ -851,7 +871,6 @@ DASHBOARD_TEMPLATE = '''
                 var url = selectedUrls[i];
                 
                 if (url.startsWith('*.')) {
-                    // Already a wildcard
                     if (wildcardMatch) {
                         urlsToAdd.push(url);
                     }
@@ -863,7 +882,6 @@ DASHBOARD_TEMPLATE = '''
                         urlsToAdd.push(exactUrl);
                     }
                 } else {
-                    // Regular domain
                     var domain = url.endsWith('/') ? url : url + '/';
                     if (exactMatch) urlsToAdd.push(domain);
                     if (wildcardMatch) urlsToAdd.push('*.' + domain);
@@ -871,27 +889,25 @@ DASHBOARD_TEMPLATE = '''
             }
             
             if (urlsToAdd.length === 0) {
-                alert('No URLs to add. Please select some URLs first.');
+                alert('Keine URLs zum Hinzufügen. Bitte erst URLs auswählen.');
                 return;
             }
             
             var submitBtn = document.getElementById('submitBtn');
             submitBtn.disabled = true;
-            submitBtn.textContent = '⏳ Submitting...';
+            submitBtn.textContent = '⏳ Wird abgesendet...';
             
             var payload = {
                 category: categorySelect.value,
                 urls: urlsToAdd,
-                ticket_id: ticketId, // Can be empty for auto-generation
-                action_type: selectedActionType
+                ticket_id: ticketId,
+                action_type: 'both'
             };
             
             console.log('[DEBUG] Submitting whitelist request:', payload);
             
-            // Set timeout for submission - increased for server environment
             var submissionTimeout = setTimeout(function() {
-                console.log('[DEBUG] Submission taking longer than expected - this is normal for server environment');
-                // Don't show timeout message immediately, the server might still be processing
+                console.log('[DEBUG] Submission taking longer than expected');
             }, 30000);
             
             fetch('/submit_whitelist', {
@@ -921,7 +937,6 @@ DASHBOARD_TEMPLATE = '''
                 clearTimeout(submissionTimeout);
                 console.log('[DEBUG] Submit response data:', data);
                 
-                // Store ticket ID for download
                 if (data.ticket_id) {
                     currentTicketId = data.ticket_id;
                 }
@@ -933,26 +948,22 @@ DASHBOARD_TEMPLATE = '''
                 clearTimeout(submissionTimeout);
                 console.error('[DEBUG] Submit error:', error);
                 
-                var errorMessage = 'Submission failed: ' + error.message;
+                var errorMessage = 'Absendung fehlgeschlagen: ' + error.message;
                 
                 if (error.message.includes('non-JSON response')) {
-                    errorMessage = 'Server error: The server returned an unexpected response. The submission may still be processing in the background. Please check the commit status manually.';
+                    errorMessage = 'Server Fehler: Server hat unerwartete Antwort gesendet. Die Absendung könnte im Hintergrund noch laufen.';
                 } else if (error.message.includes('Failed to fetch')) {
-                    errorMessage = 'Network error: Could not connect to the server. Please check your connection and try again.';
-                } else if (error.message.includes('string did not match the expected pattern')) {
-                    errorMessage = 'Validation error: One of the input values (ticket ID, URLs, or category) contains invalid characters. Please check your inputs and try again.';
+                    errorMessage = 'Netzwerkfehler: Konnte nicht zum Server verbinden. Bitte Verbindung prüfen.';
                 }
                 
                 activateStep(5);
                 var resultsDiv = document.getElementById('results');
-                resultsDiv.innerHTML = '<div class="error">' + errorMessage + 
-                                     '<br><br><strong>Note:</strong> If you see this error on a server, the whitelist operation may have succeeded in the background. ' +
-                                     'Check the server logs for confirmation.</div>';
+                resultsDiv.innerHTML = '<div class="error">' + errorMessage + '</div>';
             })
             .finally(function() {
                 clearTimeout(submissionTimeout);
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Submit Enhanced Whitelist Request';
+                submitBtn.textContent = 'Whitelist Request absenden';
             });
         }
         
@@ -960,14 +971,12 @@ DASHBOARD_TEMPLATE = '''
             console.log('[DEBUG] Downloading ticket:', ticketId);
             
             if (!ticketId) {
-                alert('No ticket ID available for download');
+                alert('Keine Ticket-ID für Download verfügbar');
                 return;
             }
             
-            // Create download link and trigger download
             var downloadUrl = '/download_ticket/' + encodeURIComponent(ticketId);
             
-            // Create temporary link element and click it
             var link = document.createElement('a');
             link.href = downloadUrl;
             link.download = 'ticket_' + ticketId + '.log';
@@ -986,20 +995,9 @@ DASHBOARD_TEMPLATE = '''
             if (data.success) {
                 var html = '<div class="success">' + data.message + '</div>';
                 
-                // Store ticket ID for download functionality
                 var ticketId = data.ticket_id || currentTicketId;
                 
-                // Add download section if ticket ID available
-                if (ticketId) {
-                    html += '<div class="download-section">';
-                    html += '<h3>📥 Download Ticket Log</h3>';
-                    html += '<p><strong>Ticket ID:</strong> ' + ticketId + '</p>';
-                    html += '<p>Download the complete ticket log file for your records and audit trail.</p>';
-                    html += '<button class="btn btn-download" onclick="downloadTicket(' + "'" + ticketId + "'" + ')">📥 Download Ticket Log</button>';
-                    html += '</div>';
-                }
-                
-                // Show commit status with live updates for immediate responses
+                // Show commit status with live updates
                 if (data.commit_job_id) {
                     html += '<div class="commit-status" id="commitStatusDiv">';
                     html += '<h3>🔄 Commit Status (Live Updates):</h3>';
@@ -1007,45 +1005,37 @@ DASHBOARD_TEMPLATE = '''
                     html += '<div id="liveStatus">';
                     
                     if (data.immediate_response) {
-                        // Server returned immediately, start live polling
-                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 SUBMITTED</span></p>';
-                        html += '<p><strong>Progress:</strong> <span id="progressText">0%</span></p>';
-                        html += '<p id="statusMessage">⏳ Commit started successfully. Checking status...</p>';
+                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 ÜBERMITTELT</span></p>';
+                        html += '<p><strong>Fortschritt:</strong> <span id="progressText">0%</span></p>';
+                        html += '<p id="statusMessage">⏳ Commit erfolgreich gestartet. Status wird geprüft...</p>';
                         
-                        // Start live polling immediately
                         setTimeout(function() {
                             startLivePolling(data.commit_job_id);
                         }, 1000);
                     } else if (data.auto_commit_status && data.auto_commit_status.auto_polled) {
-                        // Backend completed polling
                         var autoStatus = data.auto_commit_status;
                         
                         if (autoStatus.status === 'FIN') {
-                            html += '<p><strong>Status:</strong> <span style="color: green;">✅ COMPLETED</span></p>';
-                            html += '<p><strong>Progress:</strong> 100%</p>';
-                            html += '<p style="color: green;">🎉 Configuration has been successfully committed to the firewall!</p>';
+                            html += '<p><strong>Status:</strong> <span style="color: green;">✅ ABGESCHLOSSEN</span></p>';
+                            html += '<p><strong>Fortschritt:</strong> 100%</p>';
+                            html += '<p style="color: green;">🎉 Konfiguration wurde erfolgreich an die Firewall übertragen!</p>';
                         } else if (autoStatus.status === 'FAIL' || autoStatus.status === 'ERROR') {
-                            html += '<p><strong>Status:</strong> <span style="color: red;">❌ FAILED</span></p>';
-                            html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
-                            html += '<p style="color: red;">⚠️ Commit failed. Please check firewall logs.</p>';
-                            if (autoStatus.error) {
-                                html += '<p style="color: red; font-size: 12px;">Error: ' + autoStatus.error + '</p>';
-                            }
+                            html += '<p><strong>Status:</strong> <span style="color: red;">❌ FEHLGESCHLAGEN</span></p>';
+                            html += '<p><strong>Fortschritt:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                            html += '<p style="color: red;">⚠️ Commit fehlgeschlagen. Bitte Firewall-Logs prüfen.</p>';
                         } else {
                             html += '<p><strong>Status:</strong> <span style="color: orange;">⏳ ' + autoStatus.status + '</span></p>';
-                            html += '<p><strong>Progress:</strong> ' + (autoStatus.progress || '0') + '%</p>';
-                            html += '<p>⏳ Still processing...</p>';
+                            html += '<p><strong>Fortschritt:</strong> ' + (autoStatus.progress || '0') + '%</p>';
+                            html += '<p>⏳ Wird noch verarbeitet...</p>';
                             
-                            // Continue live polling for incomplete statuses
                             setTimeout(function() {
                                 startLivePolling(data.commit_job_id);
                             }, 2000);
                         }
                     } else {
-                        // Fallback - start live polling
-                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 CHECKING...</span></p>';
-                        html += '<p><strong>Progress:</strong> <span id="progressText">0%</span></p>';
-                        html += '<p id="statusMessage">⏳ Checking commit status...</p>';
+                        html += '<p><strong>Status:</strong> <span style="color: blue;">🔄 WIRD GEPRÜFT...</span></p>';
+                        html += '<p><strong>Fortschritt:</strong> <span id="progressText">0%</span></p>';
+                        html += '<p id="statusMessage">⏳ Commit-Status wird geprüft...</p>';
                         
                         setTimeout(function() {
                             startLivePolling(data.commit_job_id);
@@ -1053,60 +1043,66 @@ DASHBOARD_TEMPLATE = '''
                     }
                     
                     html += '</div>';
-                    html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')" id="refreshBtn">Refresh Status</button>';
+                    html += '<button class="btn" onclick="checkCommitStatus(' + "'" + data.commit_job_id + "'" + ')" id="refreshBtn">Status aktualisieren</button>';
                     html += '</div>';
                 } else {
-                    // No commit job ID - show warning
                     html += '<div style="background: #fff3cd; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-                    html += '<h3>⚠️ Commit Status Unknown</h3>';
-                    html += '<p>URLs were updated successfully, but commit status is not available.</p>';
-                    html += '<p>The changes may take effect automatically or may require manual commit.</p>';
+                    html += '<h3>⚠️ Commit-Status unbekannt</h3>';
+                    html += '<p>URLs wurden erfolgreich aktualisiert, aber Commit-Status ist nicht verfügbar.</p>';
+                    html += '</div>';
+                }
+                
+                // Add download section - ONLY show when commit is at 100%
+                if (ticketId) {
+                    html += '<div class="download-section hidden" id="downloadSection">';
+                    html += '<h3>📥 Ticket-Log herunterladen</h3>';
+                    html += '<p><strong>Ticket ID:</strong> ' + ticketId + '</p>';
+                    html += '<p>Laden Sie die vollständige Ticket-Log-Datei für Ihre Unterlagen und Audit-Trail herunter.</p>';
+                    html += '<button class="btn btn-download" onclick="downloadTicket(' + "'" + ticketId + "'" + ')">📥 Ticket-Log herunterladen</button>';
                     html += '</div>';
                 }
                 
                 if (data.ticket_log_file) {
                     html += '<div style="background: #e8f5e8; padding: 15px; border-radius: 4px; margin-top: 15px;">';
-                    html += '<h3>📋 Ticket Log Created:</h3>';
-                    html += '<p><strong>Log File:</strong> ' + data.ticket_log_file + '</p>';
-                    html += '<p>✅ Individual ticket log created for audit trail</p>';
+                    html += '<h3>📋 Ticket-Log erstellt:</h3>';
+                    html += '<p><strong>Log-Datei:</strong> ' + data.ticket_log_file + '</p>';
+                    html += '<p>✅ Individuelle Ticket-Log für Audit-Trail erstellt</p>';
                     html += '</div>';
                 }
                 
                 resultsDiv.innerHTML = html;
             } else {
-                resultsDiv.innerHTML = '<div class="error">Error: ' + (data.error || 'Unknown error occurred') + '</div>';
+                resultsDiv.innerHTML = '<div class="error">Fehler: ' + (data.error || 'Unbekannter Fehler aufgetreten') + '</div>';
             }
         }
         
+        // Live polling functionality
         var livePollingInterval = null;
         var livePollingAttempts = 0;
-        var maxLivePollingAttempts = 50; // 8+ minutes with 10-second intervals
+        var maxLivePollingAttempts = 50;
         
         function startLivePolling(jobId) {
             console.log('[DEBUG] Starting live polling for job:', jobId);
             livePollingAttempts = 0;
             
-            // Clear any existing interval
             if (livePollingInterval) {
                 clearInterval(livePollingInterval);
             }
             
-            // Start immediate check
             checkCommitStatusLive(jobId);
             
-            // Set up interval for continuous checking
             livePollingInterval = setInterval(function() {
                 livePollingAttempts++;
                 
                 if (livePollingAttempts >= maxLivePollingAttempts) {
-                    console.log('[DEBUG] Live polling timeout after', maxLivePollingAttempts, 'attempts');
+                    console.log('[DEBUG] Live polling timeout');
                     clearInterval(livePollingInterval);
-                    updateLiveStatus('TIMEOUT', 'unknown', 'Live polling timed out. Please use the Refresh Status button.');
+                    updateLiveStatus('TIMEOUT', 'unknown', 'Live-Polling Timeout. Bitte Status-Button verwenden.');
                     return;
                 }
                 
                 checkCommitStatusLive(jobId);
-            }, 12000); // Check every 12 seconds (slightly longer intervals)
+            }, 12000);
         }
         
         function checkCommitStatusLive(jobId) {
@@ -1121,57 +1117,39 @@ DASHBOARD_TEMPLATE = '''
                 body: JSON.stringify({job_id: jobId})
             })
             .then(function(response) {
-                console.log('[DEBUG] Live polling response status:', response.status);
-                
-                var contentType = response.headers.get('Content-Type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    throw new Error('Non-JSON response from server');
-                }
-                
                 if (!response.ok) {
                     throw new Error('HTTP error! status: ' + response.status);
                 }
                 return response.json();
             })
             .then(function(data) {
-                console.log('[DEBUG] Live polling response data:', data);
-                
                 if (data.success && data.status) {
                     var status = data.status;
                     console.log('[DEBUG] Live status update:', status.status, status.progress + '%');
                     
                     updateLiveStatus(status.status, status.progress, null, status.error);
                     
-                    // Stop polling if completed or failed
+                    // Show download section when commit reaches 100%
+                    if (status.status === 'FIN' && status.progress === '100') {
+                        var downloadSection = document.getElementById('downloadSection');
+                        if (downloadSection) {
+                            downloadSection.classList.remove('hidden');
+                        }
+                    }
+                    
                     if (status.status === 'FIN' || status.status === 'FAIL' || status.status === 'ERROR') {
                         console.log('[DEBUG] Live polling completed with final status:', status.status);
                         clearInterval(livePollingInterval);
                         
-                        // Show final completion message
                         if (status.status === 'FIN') {
-                            updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
+                            updateLiveStatus('FIN', '100', '🎉 Konfiguration wurde erfolgreich an die Firewall übertragen!');
                         }
                     }
-                } else {
-                    console.log('[DEBUG] Live polling: Invalid response structure:', data);
-                    updateLiveStatus('ERROR', 'unknown', 'Invalid response from server');
                 }
             })
             .catch(function(error) {
                 console.error('[DEBUG] Live polling error:', error);
-                
-                // Don't stop polling on single errors, but show warning
-                var errorMsg = 'Status check failed: ' + error.message + ' (retrying...)';
-                updateLiveStatus('CHECKING', 'unknown', errorMsg);
-                
-                // Stop polling after too many consecutive errors
-                if (error.message.includes('Non-JSON') || error.message.includes('HTTP error')) {
-                    if (livePollingAttempts > 5) {  // Allow a few retries
-                        console.log('[DEBUG] Too many errors, stopping live polling');
-                        clearInterval(livePollingInterval);
-                        updateLiveStatus('ERROR', 'unknown', 'Multiple status check failures. Please use the Refresh Status button.');
-                    }
-                }
+                updateLiveStatus('CHECKING', 'unknown', 'Status-Prüfung fehlgeschlagen: ' + error.message + ' (wird wiederholt...)');
             });
         }
         
@@ -1180,7 +1158,6 @@ DASHBOARD_TEMPLATE = '''
             
             var liveStatusDiv = document.getElementById('liveStatus');
             if (!liveStatusDiv) {
-                console.log('[DEBUG] Live status div not found');
                 return;
             }
             
@@ -1191,42 +1168,31 @@ DASHBOARD_TEMPLATE = '''
             if (status === 'FIN') {
                 statusColor = 'green';
                 statusIcon = '✅';
-                statusText = 'COMPLETED';
-                if (!message) message = '🎉 Configuration has been successfully committed to the firewall!';
+                statusText = 'ABGESCHLOSSEN';
+                if (!message) message = '🎉 Konfiguration wurde erfolgreich an die Firewall übertragen!';
             } else if (status === 'FAIL' || status === 'ERROR') {
                 statusColor = 'red';
                 statusIcon = '❌';
-                statusText = 'FAILED';
-                if (!message) message = '⚠️ Commit failed. Please check firewall logs.';
+                statusText = 'FEHLGESCHLAGEN';
+                if (!message) message = '⚠️ Commit fehlgeschlagen. Bitte Firewall-Logs prüfen.';
             } else if (status === 'ACT') {
                 statusColor = 'blue';
                 statusIcon = '🔄';
-                statusText = 'ACTIVE';
-                if (!message) message = '⚙️ Configuration is being applied to the firewall...';
+                statusText = 'AKTIV';
+                if (!message) message = '⚙️ Konfiguration wird auf Firewall angewendet...';
             } else if (status === 'PEND') {
                 statusColor = 'orange';
                 statusIcon = '⏳';
-                statusText = 'PENDING';
-                if (!message) message = '📋 Commit is queued and waiting to start...';
-            } else if (status === 'CHECKING') {
-                statusColor = 'blue';
-                statusIcon = '🔄';
-                statusText = 'CHECKING';
-                if (!message) message = '🔍 Checking commit status...';
-            } else if (status === 'TIMEOUT') {
-                statusColor = 'orange';
-                statusIcon = '⏰';
-                statusText = 'TIMEOUT';
-                if (!message) message = '⏰ Live polling timed out. Please check manually.';
+                statusText = 'WARTEND';
+                if (!message) message = '📋 Commit ist in der Warteschlange...';
             }
             
-            // Update the status display
             var newStatusHTML = '<p><strong>Status:</strong> <span style="color: ' + statusColor + ';">' + statusIcon + ' ' + statusText + '</span></p>';
-            newStatusHTML += '<p><strong>Progress:</strong> ' + progress + '%</p>';
+            newStatusHTML += '<p><strong>Fortschritt:</strong> ' + progress + '%</p>';
             newStatusHTML += '<p id="statusMessage">' + message;
             
             if (error) {
-                newStatusHTML += '<br><small style="color: red;">Error: ' + error + '</small>';
+                newStatusHTML += '<br><small style="color: red;">Fehler: ' + error + '</small>';
             }
             
             newStatusHTML += '</p>';
@@ -1246,63 +1212,38 @@ DASHBOARD_TEMPLATE = '''
                 body: JSON.stringify({job_id: jobId})
             })
             .then(function(response) {
-                console.log('[DEBUG] Manual status response:', response.status);
-                
-                var contentType = response.headers.get('Content-Type');
-                if (!contentType || !contentType.includes('application/json')) {
-                    throw new Error('Server returned non-JSON response for commit status');
-                }
-                
                 if (!response.ok) {
                     throw new Error('HTTP error! status: ' + response.status);
                 }
-                
                 return response.json();
             })
             .then(function(data) {
-                console.log('[DEBUG] Manual status data:', data);
-                
                 if (data.success && data.status) {
                     var status = data.status;
-                    console.log('[DEBUG] Manual status result:', status.status, status.progress + '%');
-                    
-                    // Update the live status display
                     updateLiveStatus(status.status, status.progress, null, status.error);
                     
-                    // If completed, stop any live polling
+                    // Show download section when commit reaches 100%
+                    if (status.status === 'FIN' && status.progress === '100') {
+                        var downloadSection = document.getElementById('downloadSection');
+                        if (downloadSection) {
+                            downloadSection.classList.remove('hidden');
+                        }
+                    }
+                    
                     if (status.status === 'FIN' || status.status === 'FAIL' || status.status === 'ERROR') {
-                        console.log('[DEBUG] Final status reached, stopping live polling');
                         if (livePollingInterval) {
                             clearInterval(livePollingInterval);
                         }
                         
-                        // Show completion message
                         if (status.status === 'FIN') {
-                            updateLiveStatus('FIN', '100', '🎉 Configuration has been successfully committed to the firewall!');
-                        }
-                    } else {
-                        // Status not complete, restart live polling if not running
-                        if (!livePollingInterval) {
-                            console.log('[DEBUG] Restarting live polling after manual check');
-                            setTimeout(function() {
-                                startLivePolling(jobId);
-                            }, 2000);
+                            updateLiveStatus('FIN', '100', '🎉 Konfiguration wurde erfolgreich an die Firewall übertragen!');
                         }
                     }
-                } else {
-                    console.error('[DEBUG] Invalid commit status response:', data);
-                    updateLiveStatus('ERROR', 'unknown', 'Could not get current status. Invalid response from server.');
                 }
             })
             .catch(function(error) {
                 console.error('[DEBUG] Manual commit status check failed:', error);
-                
-                var errorMsg = 'Status check failed: ' + error.message;
-                if (error.message.includes('non-JSON response')) {
-                    errorMsg = 'Server error: Could not get commit status. The job may still be processing.';
-                }
-                
-                updateLiveStatus('ERROR', 'unknown', errorMsg);
+                updateLiveStatus('ERROR', 'unknown', 'Status-Prüfung fehlgeschlagen: ' + error.message);
             });
         }
         
@@ -1310,7 +1251,7 @@ DASHBOARD_TEMPLATE = '''
             window.location.reload();
         }
         
-        console.log('[DEBUG] Dashboard script loaded successfully - Enhanced with ticket download and optional ticket ID');
+        console.log('[DEBUG] Dashboard script loaded - Enhanced with automatic dual search, category display, and conditional download');
     </script>
 </body>
 </html>
